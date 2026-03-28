@@ -1,0 +1,104 @@
+{
+  "name": "markdown-packrat",
+  "version": "0.0.1",
+  "description": "A Node.js library for moving Markdown files and their referenced local assets to new locations",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.cjs"
+      },
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.mjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/index.cjs",
+    "dist/index.mjs",
+    "dist/**/*.d.ts"
+  ],
+  "scripts": {
+    "test": "ava",
+    "test:coverage": "c8 ava",
+    "test:md": "mkdir -p reports && ava --tap | tap-json | node ./.github/scripts/generate-report.js --title \"${npm_config_title:-AVA Test Results}\" > reports/ava-test.md",
+    "test:report": "rimraf reports && npm run test:coverage && npm run test:md",
+    "clean": "rimraf dist",
+    "build": "npm run clean && rollup -c",
+    "build:dev": "NODE_ENV=development npm run build",
+    "build:prod": "NODE_ENV=production npm run build",
+    "dev": "nodemon --watch index.ts -e ts --exec \"npm run build:dev\"",
+    "check-publish": "npm pack --dry-run",
+    "publish:beta": "npm publish --tag beta --access public",
+    "publish:latest": "npm publish --tag latest --access public"
+  },
+  "ava": {
+    "files": [
+      "tests/**/*.mjs"
+    ],
+    "nodeArguments": [
+      "--experimental-vm-modules"
+    ]
+  },
+  "c8": {
+    "reports-dir": "reports/coverage",
+    "reporter": [
+      "html",
+      "lcov"
+    ],
+    "exclude": [
+      "tests/**",
+      "node_modules/**"
+    ],
+    "lines": 80,
+    "statements": 80,
+    "functions": 80,
+    "branches": 75
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isaaxite/markdown-packrat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/isaaxite/markdown-packrat/issues"
+  },
+  "keywords": [
+    "markdown",
+    "library",
+    "asset-migration",
+    "file-mover"
+  ],
+  "author": {
+    "name": "isaaxite",
+    "url": "https://github.com/isaaxite"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/isaaxite/markdown-packrat#readme",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": false
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^1.0.0",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^25.5.0",
+    "ava": "^7.0.0",
+    "c8": "^11.0.0",
+    "nodemon": "^3.1.14",
+    "rimraf": "^6.1.3",
+    "rollup": "^4.60.0",
+    "tap-json": "^1.0.0",
+    "tslib": "^2.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
