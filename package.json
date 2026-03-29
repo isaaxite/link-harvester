@@ -1,5 +1,5 @@
 {
-  "name": "markdown-packrat",
+  "name": "link-harvester",
   "version": "0.0.1",
   "description": "A Node.js library for moving Markdown files and their referenced local assets to new locations",
   "main": "./dist/index.cjs",
@@ -62,10 +62,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/isaaxite/markdown-packrat.git"
+    "url": "git+https://github.com/isaaxite/link-harvester.git"
   },
   "bugs": {
-    "url": "https://github.com/isaaxite/markdown-packrat/issues"
+    "url": "https://github.com/isaaxite/link-harvester/issues"
   },
   "keywords": [
     "markdown",
@@ -78,7 +78,7 @@
     "url": "https://github.com/isaaxite"
   },
   "license": "MIT",
-  "homepage": "https://github.com/isaaxite/markdown-packrat#readme",
+  "homepage": "https://github.com/isaaxite/link-harvester#readme",
   "sideEffects": false,
   "engines": {
     "node": ">=18.0.0"
