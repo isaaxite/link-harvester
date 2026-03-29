@@ -2,8 +2,7 @@ import test from "ava";
 import { writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractResourceLinks } from "../dist/extractor/index.mjs";
-import { LinkType } from "../dist/extractor/types.mjs";
+import { LinkType, extractResourceLinks } from "../dist/index.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const fixtures = join(__dirname, "fixtures");
