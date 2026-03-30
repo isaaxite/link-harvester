@@ -1,7 +1,7 @@
 import { extractResourceLinks } from './src/extractor';
 import { AccessibleLinkData, AccessibleLinkDataWithRef, ClassifyLinkData, ExtractedLink, LinkTarget } from './src/types';
-import { classifyLink, isAccessible, noTrailSep } from './src/utils';
-import { dirname, join } from 'node:path';
+import { classifyLink, isAccessible, removeTrailSep } from './src/utils';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import fg from 'fast-glob';
 
 export { LinkType, LinkTarget, AccessibleLinkDataWithRef, ExtractedLink } from './src/types';
@@ -10,13 +10,25 @@ export class LinkHarvester {
   /** The base directory for markdown files and assets.absolute path */
   private base: string;
   // List of markdown files detected in the base directory and its subdirectories.relative to the base directory
-  private mdFiles: string[] = [];
+  private mdRelativePaths: string[] = [];
   // Cache to store processed markdown files and their link data to optimize reference checking
   private _cache: any = {};
 
   constructor(base: string) {
-    this.base = noTrailSep(base);
-    this.mdFiles = this.detectFiles();
+    if (typeof base !== 'string') {
+      throw new Error('Base directory must be a string');
+    }
+
+    if (!isAbsolute(base)) {
+      throw new Error('Base directory must be an absolute path');
+    }
+
+    if (!isAccessible(base)) {
+      throw new Error(`Base directory "${base}" does not exist or is not accessible.`);
+    }
+
+    this.base = removeTrailSep(base);
+    this.mdRelativePaths = this.detectFiles();
   }
 
   /** Detect markdown files in the base directory and its subdirectories. */
@@ -94,13 +106,13 @@ export class LinkHarvester {
 
   /**
    * Retrieve external references to a local asset.
-   * @param mdFilePath The path to the markdown file relative to the base directory.
+   * @param mainMdFilePath The path to the markdown file relative to the base directory.
    * @param assetAbsPath The absolute path to the local asset.
    * @returns A promise resolving to an array of markdown file paths that reference the asset.
    */
-  private async getExternalRefs(mdFilePath: string, assetAbsPath: string) {
-    return Promise.allSettled(this.mdFiles.map((curMdFilePath) => {
-      if (mdFilePath === curMdFilePath) {
+  private async detectExternalRefs(mainMdFilePath: string, assetAbsPath: string) {
+    return Promise.allSettled(this.mdRelativePaths.map((curMdFilePath) => {
+      if (mainMdFilePath === curMdFilePath) {
         return Promise.resolve();
       }
 
@@ -144,12 +156,33 @@ export class LinkHarvester {
    * @param realtive The path to the markdown file relative to the base directory.
    * @returns A promise resolving to an object containing accessible and invalid link data.
    */
-  public async localAssets(realtive: string) {
+  public async localAssets(mdFilePath: string) {
+    if (typeof mdFilePath !== 'string') {
+      throw new Error('The path must be a string.');
+    }
+
+    let mdRelativePath: string;
+    if (isAbsolute(mdFilePath)) {
+      if (!isAccessible(mdFilePath)) {
+        throw new Error(`The file "${mdFilePath}" does not exist or is not accessible.`);
+      }
+
+      if (!mdFilePath.startsWith(this.base)) {
+        throw new Error(`The file "${mdFilePath}" is outside the base directory.`);
+      }
+
+      mdRelativePath = relative(this.base, mdFilePath);
+    } else if (isAccessible(join(this.base, mdFilePath))) {
+      mdRelativePath = removeTrailSep(mdFilePath);
+    } else {
+      throw new Error(`The file "${mdFilePath}" does not exist or is not accessible.`);
+    }
+
     const accessible: Array<AccessibleLinkDataWithRef> = [];
     const invalid: ExtractedLink[] = [];
     const invalidHandler = (it: ExtractedLink) => invalid.push(it);
     const accessibleHandler = async (data: AccessibleLinkData) => {
-      const refs = await this.getExternalRefs(realtive, data.absolute);
+      const refs = await this.detectExternalRefs(mdRelativePath, data.absolute);
 
       accessible.push({
         ...data,
@@ -157,8 +190,13 @@ export class LinkHarvester {
       });
     };
 
-    await this.localAssetAccessibility(realtive, {
+    /**
+     * Processes the markdown file to check the accessibility of local assets, categorizing them as either accessible or invalid. For each accessible asset, it also gathers references from other markdown files in the base directory that link to the same asset.
+     */
+    await this.localAssetAccessibility(mdRelativePath, {
+      // Handle invalid links by adding them to the invalid array
       invalidHandler,
+      // Handle accessible links by adding them to the accessible array with their external references
       accessibleHandler,
     });
 

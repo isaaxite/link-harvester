@@ -60,6 +60,6 @@ export function classifyLink(url: string) {
 }
 
 /** Remove trailing path separators from a file path */
-export function noTrailSep(pathStr: string) {
+export function removeTrailSep(pathStr: string) {
   return pathStr.replace(new RegExp(`${sep}+$`), '');
 }
