@@ -4,7 +4,7 @@ import { classifyLink, isAccessible, noTrailSep } from './src/utils';
 import { dirname, join } from 'node:path';
 import fg from 'fast-glob';
 
-export { LinkType, LinkTarget } from './src/types';
+export { LinkType, LinkTarget, AccessibleLinkDataWithRef, ExtractedLink } from './src/types';
 export { extractResourceLinks } from './src/extractor';
 export class LinkHarvester {
   /** The base directory for markdown files and assets.absolute path */
@@ -61,7 +61,7 @@ export class LinkHarvester {
     const accessible: Array<AccessibleLinkData> = [];
 
     for (const item of links) {
-      if (item.linkTarget !== LinkTarget.LOCAL_RESOURCE) {
+      if (item.linkTarget !== LinkTarget.LocalResource) {
         continue;
       }
       

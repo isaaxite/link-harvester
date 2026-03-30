@@ -1,8 +1,16 @@
 export enum LinkType {
-  MarkdownLink = 'markdown-link',
-  MarkdownImage = 'markdown-image',
-  HtmlImage = 'html-img',
-  HtmlAnchor = 'html-anchor',
+  MarkdownLink = 'markdown_link',
+  MarkdownImage = 'markdown_image',
+  HtmlImage = 'html_image',
+  HtmlAnchor = 'html_anchor',
+}
+
+export enum LinkTarget {
+  ExternalPage = 'external_page',
+  ExternalResource = 'external_resource',
+  LocalResource = 'local_resource',
+  InPageAnchor = 'in_page_anchor',
+  Other = 'other',
 }
 
 export interface ExtractedLink {
@@ -12,14 +20,6 @@ export interface ExtractedLink {
   line: number;
   alt?: string; // For markdown images
   text?: string; // For markdown links
-}
-
-export enum LinkTarget {
-  EXTERNAL_PAGE = 'external_page',
-  EXTERNAL_RESOURCE = 'external_resource',
-  LOCAL_RESOURCE = 'local_resource',
-  IN_PAGE_ANCHOR = 'in_page_anchor',
-  OTHER = 'other',
 }
 
 export type AccessibleLinkData = ExtractedLink & { absolute: string };

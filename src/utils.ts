@@ -33,30 +33,30 @@ export function classifyLink(url: string) {
 
   // Empty or whitespace-only URLs are classified as 'other'
   if (!trimmed) {
-    return LinkTarget.OTHER;
+    return LinkTarget.Other;
   }
   
   // In-page anchors start with '#'
   if (trimmed.startsWith('#')) {
-    return LinkTarget.IN_PAGE_ANCHOR;
+    return LinkTarget.InPageAnchor;
   }
 
   // External URLs start with http:// or https://
   if (/^https?:\/\//i.test(trimmed)) {
     if (isResourceUrl(trimmed)) {
-      return LinkTarget.EXTERNAL_RESOURCE;
+      return LinkTarget.ExternalResource;
     } else {
-      return LinkTarget.EXTERNAL_PAGE;
+      return LinkTarget.ExternalPage;
     }
   }
 
   // URLs with a scheme (e.g., mailto:, ftp:) are classified as 'other'
   if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
-    return LinkTarget.OTHER;
+    return LinkTarget.Other;
   }
 
   // All other URLs are treated as local resources
-  return LinkTarget.LOCAL_RESOURCE;
+  return LinkTarget.LocalResource;
 }
 
 /** Remove trailing path separators from a file path */

@@ -1,9 +1,10 @@
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
+import dts from 'rollup-plugin-dts';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-export default {
+export default [{
   input: 'index.ts',
   output: [
     {
@@ -22,8 +23,6 @@ export default {
   plugins: [
     typescript({
       tsconfig: './tsconfig.json',
-      // declaration: false,
-      // declarationDir: undefined
     }),
     isProduction && terser({
       // 详细配置见下文
@@ -38,4 +37,8 @@ export default {
       mangle: true, // 启用名称混淆（变量名缩短）
     }),
   ]
-};
+}, {
+  input: 'index.ts',       // 或 'dist/types/index.d.ts'
+  output: { file: 'dist/types/index.d.ts', format: 'es' },
+  plugins: [dts()]
+}];

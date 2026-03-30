@@ -7,9 +7,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "rootDir": "./",
-    "declaration": true,
-    "declarationDir": "./dist/types",
-    "emitDeclarationOnly": true
+    // "declaration": true,
+    // "declarationDir": "./dist/types",
+    // "emitDeclarationOnly": true
   },
   "include": ["./index.ts", "./src/**/*.ts"]
 }
