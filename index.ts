@@ -4,9 +4,15 @@ import { ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpC
 import { isAccessible, mergeFilters, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
 
+type State = 'array' | 'object';
+
+type ThenParam<TState> = TState extends 'array'
+  ? ExtractedLink[]
+  : { [key: string]: ExtractedLink[] };
+
 export { LinkType, LinkTarget, ClassifyType } from './src/types';
 export { extractLinks } from './src/extractor';
-export class LinkHarvester {
+export class LinkHarvester<TState extends State = 'array'> {
   private base: string;
   private filePath: string;
   private otherFilePaths: string[] | null = null;
@@ -258,14 +264,14 @@ export class LinkHarvester {
     return this;
   }
 
-  filter(predicate: FilterPredicate): this {
+  filter(predicate: FilterPredicate): LinkHarvester<'array'> {
     this._push({ type: 'filter', predicate });
-    return this;
+    return this as any;
   }
 
-  filterBy(type: LinkType): this;
-  filterBy(type: LinkTarget): this;
-  filterBy(type: any): this {
+  filterBy(type: LinkType): LinkHarvester<'array'>;
+  filterBy(type: LinkTarget): LinkHarvester<'array'>;
+  filterBy(type: any): LinkHarvester<'array'> {
     if ([
       LinkType.HtmlAnchor,
       LinkType.HtmlImage,
@@ -284,28 +290,28 @@ export class LinkHarvester {
     } else {
       throw TypeError('The type is not a LinkType or LinkTarget');
     }
-    return this;
+    return this as any;
   }
 
-  on(key: string): OnProxy {
-    return new OnProxy(this, key);
+  on(key: string): OnProxy<'object'> {
+    return new OnProxy(this as any, key);
   }
 
-  detectExternalRefs(): this {
+  detectExternalRefs(): LinkHarvester<'object'> {
     this._push({ type: 'detectExternalRefs', keys: null });
-    return this;
+    return this as any;
   }
 
-  classify(buckets: Record<string, FilterPredicate | string>) {
+  classify(buckets: Record<string, FilterPredicate | string>): LinkHarvester<'object'> {
     this._push({ type: 'classify', buckets });
     return {
       then: this.then.bind(this),
       on: this.on.bind(this),
       detectExternalRefs: this.detectExternalRefs.bind(this),
-    };
+    } as any;
   }
 
-  classifyBy(type: ClassifyType) {
+  classifyBy(type: ClassifyType): LinkHarvester<'object'> {
     if (type !== ClassifyType.IfAccessable) {
       throw TypeError(`The type must be a ${ClassifyType.IfAccessable}.`)
     }
@@ -324,22 +330,25 @@ export class LinkHarvester {
   }
 
   // Thenable
-  then(onFulfilled: (v: any) => any, onRejected?: (e: any) => any) {
+  then<TResult1 = ThenParam<TState>, TResult2 = never>(
+    onFulfilled?: (value: ThenParam<TState>) => TResult1 | PromiseLike<TResult1>,
+    onRejected?: (reason: any) => TResult2 | PromiseLike<TResult2>
+  ): Promise<TResult1 | TResult2> {
     return this._promise.then(onFulfilled, onRejected);
   }
 }
 
-class OnProxy {
+class OnProxy<TState extends State = 'object'> {
   constructor(
     private pipeline: LinkHarvester,
     private key:      string,
   ) {}
 
-  detectExternalRefs(): LinkHarvester {
+  detectExternalRefs(): LinkHarvester<'object'> {
     (this.pipeline as any)._push({
       type: 'detectExternalRefs',
       keys: [this.key],
     } satisfies OpDescriptor);
-    return this.pipeline;
+    return this.pipeline as any;
   }
 }
