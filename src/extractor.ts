@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { ExtractedLink, LinkType } from "./types";
+import { classifyLink } from "./utils";
 
 /**
  * Extracts resource links from a markdown file.
@@ -8,7 +9,7 @@ import { ExtractedLink, LinkType } from "./types";
  * @param filePath - The path to the markdown file to extract links from.
  * @returns An array of extracted links with their type, syntax, URL, line number, and optional alt/text.
  */
-export async function extractResourceLinks(filePath: string) {
+export async function extractLinks(filePath: string) {
   const links: Array<ExtractedLink> = [];
   const fileStream = createReadStream(filePath);
   const rl = createInterface({
@@ -27,6 +28,7 @@ export async function extractResourceLinks(filePath: string) {
     while ((match = imgRegex.exec(line)) !== null) {
       links.push({
         type: LinkType.MarkdownImage,
+        linkTarget: classifyLink(match[2]),
         syntax: match[0],
         alt: match[1],
         url: match[2],
@@ -39,6 +41,7 @@ export async function extractResourceLinks(filePath: string) {
     while ((match = linkRegex.exec(line)) !== null) {
       links.push({
         type: LinkType.MarkdownLink,
+        linkTarget: classifyLink(match[2]),
         syntax: match[0],
         text: match[1],
         url: match[2],
@@ -51,6 +54,7 @@ export async function extractResourceLinks(filePath: string) {
     while ((match = imgHtmlRegex.exec(line)) !== null) {
       links.push({
         type: LinkType.HtmlImage,
+        linkTarget: classifyLink(match[1]),
         syntax: match[0],
         url: match[1],
         line: lineNumber,
@@ -62,6 +66,7 @@ export async function extractResourceLinks(filePath: string) {
     while ((match = aHtmlRegex.exec(line)) !== null) {
       links.push({
         type: LinkType.HtmlAnchor,
+        linkTarget: classifyLink(match[1]),
         syntax: match[0],
         url: match[1],
         line: lineNumber,

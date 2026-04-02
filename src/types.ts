@@ -15,15 +15,31 @@ export enum LinkTarget {
 
 export interface ExtractedLink {
   type: LinkType;
+  linkTarget: LinkTarget;
   syntax: string;
   url: string;
   line: number;
   alt?: string; // For markdown images
   text?: string; // For markdown links
+  externalRefs?: string[];
 }
 
 export type AccessibleLinkData = ExtractedLink & { absolute: string };
 
 export type AccessibleLinkDataWithRef = AccessibleLinkData & { externalRefs: string[] };
 
-export type ClassifyLinkData = ExtractedLink & { linkTarget: LinkTarget };
+export type CategorizedLinkedData = ExtractedLink & { linkTarget: LinkTarget };
+
+export enum ClassifyType {
+  IfAccessable = 'if_accessable',
+}
+
+export type FilterPredicate = (item: ExtractedLink) => boolean;
+
+export type OpFilterDescriptor = { type: 'filter';   predicate: FilterPredicate };
+
+export type OpClassifyDescriptor = { type: 'classify'; buckets: Record<string, FilterPredicate | string> };
+
+export type OpDetectExternalRefsDescriptor = { type: 'detectExternalRefs'; keys: string[] | null };
+
+export type OpDescriptor = OpFilterDescriptor | OpClassifyDescriptor | OpDetectExternalRefsDescriptor;

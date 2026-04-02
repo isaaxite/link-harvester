@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { RESOURCE_EXTENSIONS } from "./constants";
-import { LinkTarget } from "./types";
+import { FilterPredicate, LinkTarget, OpDescriptor } from "./types";
 import { sep } from "node:path";
 
 export function isResourceUrl(url: string) {
@@ -62,4 +62,29 @@ export function classifyLink(url: string) {
 /** Remove trailing path separators from a file path */
 export function removeTrailSep(pathStr: string) {
   return pathStr.replace(new RegExp(`${sep}+$`), '');
+}
+
+export function mergeFilters(ops: OpDescriptor[]) {
+  const result: OpDescriptor[] = [];
+  let i = 0;
+
+  while (i < ops.length) {
+    if (ops[i].type !== 'filter') {
+      result.push(ops[i++]);
+      continue; 
+    }
+
+    const predicates: Array<FilterPredicate> = [];
+
+    while (i < ops.length && ops[i].type === 'filter') {
+      const op = ops[i++];
+      predicates.push((op as any).predicate);
+    }
+
+    result.push({
+      type: 'filter',
+      predicate: x => [...predicates].every(p => p(x)),
+    });
+  }
+  return result;
 }

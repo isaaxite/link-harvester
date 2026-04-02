@@ -1,20 +1,25 @@
-import { extractResourceLinks } from './src/extractor';
-import { AccessibleLinkData, AccessibleLinkDataWithRef, ClassifyLinkData, ExtractedLink, LinkTarget } from './src/types';
-import { classifyLink, isAccessible, removeTrailSep } from './src/utils';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { extractLinks } from "./src/extractor";
+import { ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDetectExternalRefsDescriptor, OpFilterDescriptor } from "./src/types";
+import { isAccessible, mergeFilters, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
 
-export { LinkType, LinkTarget, AccessibleLinkDataWithRef, ExtractedLink } from './src/types';
-export { extractResourceLinks } from './src/extractor';
+export { LinkType, LinkTarget, ClassifyType } from './src/types';
+export { extractLinks } from './src/extractor';
 export class LinkHarvester {
-  /** The base directory for markdown files and assets.absolute path */
   private base: string;
-  // List of markdown files detected in the base directory and its subdirectories.relative to the base directory
-  private mdRelativePaths: string[] = [];
-  // Cache to store processed markdown files and their link data to optimize reference checking
+  private filePath: string;
+  private otherFilePaths: string[] | null = null;
+  private ops:      OpDescriptor[] = [];
+  private _pending: boolean        = false;
+  private _resolve!: (value: any) => void;
+  private _promise:  Promise<any>;
   private _cache: any = {};
+  private dataList: ExtractedLink[] | null = null;
 
-  constructor(base: string) {
+  constructor(props: { base: string; filePath: string }) {
+    const { base, filePath } = props;
+
     if (typeof base !== 'string') {
       throw new Error('Base directory must be a string');
     }
@@ -28,90 +33,179 @@ export class LinkHarvester {
     }
 
     this.base = removeTrailSep(base);
-    this.mdRelativePaths = this.detectFiles();
+
+    if (typeof filePath !== 'string') {
+      throw new Error('The path must be a string.');
+    }
+
+    if (isAbsolute(filePath)) {
+      if (!isAccessible(filePath)) {
+        throw new Error(`The file "${filePath}" does not exist or is not accessible.`);
+      }
+
+      if (!filePath.startsWith(this.base)) {
+        throw new Error(`The file "${filePath}" is outside the base directory.`);
+      }
+
+      this.filePath = relative(this.base, filePath);
+    } else if (isAccessible(join(this.base, filePath))) {
+      this.filePath = removeTrailSep(filePath);
+    } else {
+      throw new Error(`The file "${filePath}" does not exist or is not accessible.`);
+    }
+
+    this._promise = new Promise(resolve => { this._resolve = resolve; });
   }
 
-  /** Detect markdown files in the base directory and its subdirectories. */
-  private detectFiles() {
-    return fg.sync(`**/*.{md,markdown}`, {
-      onlyFiles: true,
-      cwd: this.base,
+  private _getOtherFilePaths() {
+    if (!this.otherFilePaths) {
+      this.otherFilePaths = fg.sync(`**/*.{md,markdown}`, {
+        onlyFiles: true,
+        cwd: this.base,
+      });
+    }
+
+    return this.otherFilePaths;
+  }
+
+  private _push(op: OpDescriptor) {
+    this.ops.push(op);
+  }
+
+  private _schedule() {
+    if (this._pending) return;
+    this._pending = true;
+    Promise.resolve().then(() => {
+      this._pending = false;
+      this._flush();
     });
   }
 
-  /**
-   * Retrieve link data from a markdown file.
-   * @param filepath The path to the markdown file relative to the base directory.
-   * @returns A promise resolving to an array of link data.
-   */
-  private async getLinkDatas(filepath: string) {
-    const resources = await extractResourceLinks(filepath);
-    const resourceLinks: Array<ClassifyLinkData> = [];
-    for (const item of resources) {
-      resourceLinks.push({
-        ...item,
-        linkTarget: classifyLink(item.url)
-      });
-    }
-    return resourceLinks;
+  private async _flush() {
+    const result = await this._execute();
+    this._resolve(result);
   }
 
-  /**
-   * Check the accessibility of local assets in a markdown file.
-   * @param realtive The path to the markdown file relative to the base directory.
-   * @param opt Options for handling invalid and accessible links.
-   * @param opt.invalidHandler A callback function to handle invalid links.
-   * @param opt.accessibleHandler A callback function to handle accessible links, receiving the link data with absolute path.
-   * @returns A promise that resolves when the accessibility check is complete.
-   */
-  private async localAssetAccessibility(realtive: string, opt: {
-    invalidHandler?: (linkData: ExtractedLink) => void;
-    accessibleHandler?: (linkData: AccessibleLinkData) => Promise<any>;
-  }) {
-    const filePath = join(this.base, realtive);
-    const links = await this.getLinkDatas(filePath);
-    const accessible: Array<AccessibleLinkData> = [];
+  private async _execute() {
+    if (!this.dataList) {
+      const absolute = join(this.base, this.filePath);
+      this.dataList = await extractLinks(absolute);
+    }
 
-    for (const item of links) {
-      if (item.linkTarget !== LinkTarget.LocalResource) {
-        continue;
+    if (!this.ops.length) {
+      return this.dataList;
+    }
+
+    const ops = mergeFilters([...this.ops]);
+    const opTypeSet = ops.reduce((set, it) => {
+      set.add(it.type);
+      return set;
+    }, new Set() as Set<string>);
+
+    if (opTypeSet.has('filter') && !opTypeSet.has('classify')) {
+      const result: ExtractedLink[] = [];
+      const [filter] = ops as [OpFilterDescriptor];
+      for (const data of this.dataList) {
+        if (!filter.predicate(data)) { continue; }
+        result.push(data);
       }
-      
-      const absolute = join(dirname(filePath), item.url);
+      return result;
+    }
 
-      if (!isAccessible(absolute)) {
-        opt.invalidHandler?.(item);
-        continue;
+    const detectExternalRefs = async (key: string, data: ExtractedLink, op: OpDescriptor) => {
+      if (op.type !== 'detectExternalRefs') {
+        return;
       }
 
-      await opt.accessibleHandler?.({
-        ...item,
-        absolute,
+      const dirPath = dirname(join(this.base, this.filePath));
+      const abs = join(dirPath, data.url);
+
+      if (!op.keys) {
+        const refs = await this._detectExternalRefs(abs);
+        return refs;
+      }
+
+      if (op.keys && !op.keys.includes(key)) {
+        return;
+      }
+
+      const refs = await this._detectExternalRefs(abs) || [];
+      data.externalRefs = refs;
+      return refs;
+    };
+
+    const handleClassify = async (
+      dataList: ExtractedLink[],
+      buckets: Record<string, string | FilterPredicate>,
+      opt?: {
+        filter?: FilterPredicate;
+        detectExternalRefs?: OpDescriptor;
+      },
+    ) => {
+      const result: { [key: string]: ExtractedLink[] } = {};
+
+      const keys = Object.keys(buckets);
+      let restKey = 'rest';
+      const restKeyIdx = keys.findIndex(key => key === 'rest');
+      if (restKeyIdx !== -1) {
+        restKey = buckets.rest as string;
+        keys.splice(restKeyIdx, 1);
+      }
+      result[restKey] = [];
+
+      for (const data of dataList) {
+        if (opt?.filter && !opt.filter(data)) {
+          continue;
+        }
+
+        let hasRest = true;
+        for (const key of keys) {
+          const filter = buckets[key] as FilterPredicate;
+          if (filter(data)) {
+            if (!result[key]) { result[key] = []; }
+            hasRest = false;
+            
+            if (opt?.detectExternalRefs) {
+              await detectExternalRefs(key, data, opt.detectExternalRefs);
+            }
+            result[key].push(data);
+          }
+        }
+        if (hasRest) {
+          result[restKey].push(data);
+        }
+      }
+
+      return result;
+    }
+
+    if (!opTypeSet.has('filter') && opTypeSet.has('classify')) {
+      const [classify, detectExternalRefs] = ops as [OpClassifyDescriptor, OpDetectExternalRefsDescriptor];
+      const buckets: Record<string, string | FilterPredicate> = (classify as any).buckets;
+      return await handleClassify(this.dataList, buckets, {
+        detectExternalRefs,
       });
     }
+
+    const [
+      filter,
+      classify,
+      itDetectExternalRefs,
+    ] = ops as [
+      OpFilterDescriptor,
+      OpClassifyDescriptor,
+      OpDetectExternalRefsDescriptor,
+    ];
+
+    return await handleClassify(this.dataList, classify.buckets, {
+      filter: filter.predicate,
+      detectExternalRefs: itDetectExternalRefs,
+    });
   }
 
-  /**
-   * Retrieve accessible local assets from a markdown file.
-   * @param realtive The path to the markdown file relative to the base directory.
-   * @returns A promise resolving to an array of accessible link data. 
-   */
-  private async getLocalAccessibleAssetsOf(realtive: string) {
-    const accessible: Array<AccessibleLinkData> = [];
-    const accessibleHandler = async (it: AccessibleLinkData) => accessible.push(it);
-    await this.localAssetAccessibility(realtive, { accessibleHandler });
-
-    return accessible;
-  }
-
-  /**
-   * Retrieve external references to a local asset.
-   * @param mainMdFilePath The path to the markdown file relative to the base directory.
-   * @param assetAbsPath The absolute path to the local asset.
-   * @returns A promise resolving to an array of markdown file paths that reference the asset.
-   */
-  private async detectExternalRefs(mainMdFilePath: string, assetAbsPath: string) {
-    return Promise.allSettled(this.mdRelativePaths.map((curMdFilePath) => {
+  private async _detectExternalRefs(assetAbsPath: string) {
+    const mainMdFilePath = this.filePath;
+    return Promise.allSettled(this._getOtherFilePaths().map(async (curMdFilePath) => {
       if (mainMdFilePath === curMdFilePath) {
         return Promise.resolve();
       }
@@ -133,11 +227,19 @@ export class LinkHarvester {
         return Promise.resolve(getRef(this._cache[curMdFilePath]));
       }
 
-      return this.getLocalAccessibleAssetsOf(curMdFilePath)
-        .then((linkDataArr) => {
-          this._cache[curMdFilePath] = linkDataArr;
-          return getRef(linkDataArr);
-        });
+      const filePath = join(this.base, curMdFilePath);
+      const links = await extractLinks(filePath);
+      const linkDataArr = [];
+      for (const item of links) {
+        if (item.linkTarget !== LinkTarget.LocalResource) { continue; }
+        const absolute = join(dirname(filePath), item.url);
+        linkDataArr.push({
+          ...item,
+          absolute,
+        })
+      }
+      this._cache[curMdFilePath] = linkDataArr;
+      return Promise.resolve(getRef(linkDataArr));
     })).then((ret) => {
       const last: string[] = [];
       for (const item of ret) {
@@ -151,58 +253,93 @@ export class LinkHarvester {
     });
   }
 
-  /**
-   * Retrieve local assets from a markdown file.
-   * @param realtive The path to the markdown file relative to the base directory.
-   * @returns A promise resolving to an object containing accessible and invalid link data.
-   */
-  public async localAssets(mdFilePath: string) {
-    if (typeof mdFilePath !== 'string') {
-      throw new Error('The path must be a string.');
-    }
+  gather(): this {
+    this._schedule();
+    return this;
+  }
 
-    let mdRelativePath: string;
-    if (isAbsolute(mdFilePath)) {
-      if (!isAccessible(mdFilePath)) {
-        throw new Error(`The file "${mdFilePath}" does not exist or is not accessible.`);
-      }
+  filter(predicate: FilterPredicate): this {
+    this._push({ type: 'filter', predicate });
+    return this;
+  }
 
-      if (!mdFilePath.startsWith(this.base)) {
-        throw new Error(`The file "${mdFilePath}" is outside the base directory.`);
-      }
-
-      mdRelativePath = relative(this.base, mdFilePath);
-    } else if (isAccessible(join(this.base, mdFilePath))) {
-      mdRelativePath = removeTrailSep(mdFilePath);
+  filterBy(type: LinkType): this;
+  filterBy(type: LinkTarget): this;
+  filterBy(type: any): this {
+    if ([
+      LinkType.HtmlAnchor,
+      LinkType.HtmlImage,
+      LinkType.MarkdownImage,
+      LinkType.MarkdownLink,
+    ].includes(type)) {
+      this._push({ type: 'filter', predicate: (data) => data.type === type });
+    } else if ([
+      LinkTarget.ExternalPage,
+      LinkTarget.ExternalResource,
+      LinkTarget.InPageAnchor,
+      LinkTarget.LocalResource,
+      LinkTarget.Other,
+    ].includes(type)) {
+      this._push({ type: 'filter', predicate: (data) => data.linkTarget === type });
     } else {
-      throw new Error(`The file "${mdFilePath}" does not exist or is not accessible.`);
+      throw TypeError('The type is not a LinkType or LinkTarget');
+    }
+    return this;
+  }
+
+  on(key: string): OnProxy {
+    return new OnProxy(this, key);
+  }
+
+  detectExternalRefs(): this {
+    this._push({ type: 'detectExternalRefs', keys: null });
+    return this;
+  }
+
+  classify(buckets: Record<string, FilterPredicate | string>) {
+    this._push({ type: 'classify', buckets });
+    return {
+      then: this.then.bind(this),
+      on: this.on.bind(this),
+      detectExternalRefs: this.detectExternalRefs.bind(this),
+    };
+  }
+
+  classifyBy(type: ClassifyType) {
+    if (type !== ClassifyType.IfAccessable) {
+      throw TypeError(`The type must be a ${ClassifyType.IfAccessable}.`)
     }
 
-    const accessible: Array<AccessibleLinkDataWithRef> = [];
-    const invalid: ExtractedLink[] = [];
-    const invalidHandler = (it: ExtractedLink) => invalid.push(it);
-    const accessibleHandler = async (data: AccessibleLinkData) => {
-      const refs = await this.detectExternalRefs(mdRelativePath, data.absolute);
+    return this.classify({
+      accessible: (data) => {
+        if (data.linkTarget !== LinkTarget.LocalResource) {
+          return false;
+        }
 
-      accessible.push({
-        ...data,
-        externalRefs: refs || [],
-      });
-    };
-
-    /**
-     * Processes the markdown file to check the accessibility of local assets, categorizing them as either accessible or invalid. For each accessible asset, it also gathers references from other markdown files in the base directory that link to the same asset.
-     */
-    await this.localAssetAccessibility(mdRelativePath, {
-      // Handle invalid links by adding them to the invalid array
-      invalidHandler,
-      // Handle accessible links by adding them to the accessible array with their external references
-      accessibleHandler,
+        const dirPath = dirname(join(this.base, this.filePath));
+        return isAccessible(join(dirPath, data.url))
+      },
+      rest: 'invalid',
     });
+  }
 
-    // Clear cache after processing to free up memory
-    this._cache = {};
+  // Thenable
+  then(onFulfilled: (v: any) => any, onRejected?: (e: any) => any) {
+    return this._promise.then(onFulfilled, onRejected);
+  }
+}
 
-    return { accessible, invalid };
+class OnProxy {
+  constructor(
+    private pipeline: LinkHarvester,
+    private key:      string,
+  ) {}
+
+  detectExternalRefs(): LinkHarvester {
+    (this.pipeline as any)._push({
+      type: 'detectExternalRefs',
+      keys: [this.key],
+    } satisfies OpDescriptor);
+    return this.pipeline;
   }
 }
