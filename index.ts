@@ -1,10 +1,9 @@
 import { extractLinks } from "./src/extractor";
 import { dirname, join } from "node:path";
-import { ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDetectExternalRefsDescriptor, OpFilterDescriptor } from "./src/types";
+import { ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam } from "./src/types";
 import { isAccessible, mergeFilters } from "./src/utils";
 import fg from 'fast-glob';
-
-class Pipeline {
+class Pipeline<TState extends State = 'object'> {
   private _cache: any = {};
   private dataList: ExtractedLink[] = [];
   private otherFilePaths: string[] | null = null;
@@ -215,15 +214,15 @@ class Pipeline {
     });
   }
 
-  protected then(
-    onFulfilled?: (_value: any) => any,
-    onRejected?: (_reason: any) => never
-  ): Promise<any> {
+  protected then<TResult1 = ThenParam<TState>, TResult2 = never>(
+    onFulfilled?: (value: ThenParam<TState>) => TResult1 | PromiseLike<TResult1>,
+    onRejected?: (reason: any) => TResult2 | PromiseLike<TResult2>
+  ): Promise<TResult1 | TResult2> {
     return this._promise.then(onFulfilled, onRejected);
   }
 }
 
-class DetectPipeline extends Pipeline {
+class DetectPipeline<TState extends State = 'object'> extends Pipeline<TState> {
   protected keys: string[] = [];
 
   constructor(props: any) {
@@ -243,7 +242,7 @@ class DetectPipeline extends Pipeline {
   }
 }
 
-class ClassificationPipeline extends DetectPipeline {
+class ClassificationPipeline<TState extends State = 'object'> extends DetectPipeline<TState> {
   constructor(props: any) {
     super({
       ops: props.ops,
@@ -273,12 +272,15 @@ class ClassificationPipeline extends DetectPipeline {
     });
   }
 
-  then(...rest: Parameters<typeof this._promise.then>): ReturnType<typeof this._promise.then> {
-    return this._promise.then(...rest);
+  then<TResult1 = ThenParam<TState>, TResult2 = never>(
+    onFulfilled?: (value: ThenParam<TState>) => TResult1 | PromiseLike<TResult1>,
+    onRejected?: (reason: any) => TResult2 | PromiseLike<TResult2>
+  ): Promise<TResult1 | TResult2> {
+    return this._promise.then(onFulfilled, onRejected);
   }
 }
 
-class LinkDataPipeline extends Pipeline {
+class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> {
   constructor(props: any) {
     super();
     this.ops = props.ops;
@@ -326,7 +328,7 @@ class LinkDataPipeline extends Pipeline {
     throw TypeError('The type is not a LinkType or LinkTarget');
   }
 
-  classify(buckets: Record<string, FilterPredicate | string>) {
+  classify(buckets: Record<string, FilterPredicate | string>): ClassificationPipeline<'object'> {
     this._push({ type: 'classify', buckets });
     return new ClassificationPipeline({
       ops: this.ops,
@@ -356,11 +358,16 @@ class LinkDataPipeline extends Pipeline {
     });
   }
 
-  then(...rest: Parameters<typeof this._promise.then>): ReturnType<typeof this._promise.then> {
-    return this._promise.then(...rest);
+  then<TResult1 = ThenParam<TState>, TResult2 = never>(
+    onFulfilled?: (value: ThenParam<TState>) => TResult1 | PromiseLike<TResult1>,
+    onRejected?: (reason: any) => TResult2 | PromiseLike<TResult2>
+  ): Promise<TResult1 | TResult2> {
+    return this._promise.then(onFulfilled, onRejected);
   }
 }
 
+export { extractLinks } from './src/extractor';
+export { LinkTarget, LinkType, ClassifyType, ExtractedLink } from './src/types';
 export class LinkHarvester extends Pipeline {
   constructor({ base, filePath }: any) {
     super();
@@ -369,7 +376,7 @@ export class LinkHarvester extends Pipeline {
     this._promise = new Promise(resolve => { this._resolve = resolve; });
   }
 
-  gather() {
+  gather(): LinkDataPipeline {
     this._push({ type: 'gather' })
     this._schedule();
 

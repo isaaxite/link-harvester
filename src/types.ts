@@ -43,3 +43,9 @@ export type OpClassifyDescriptor = { type: 'classify'; buckets: Record<string, F
 export type OpDetectExternalRefsDescriptor = { type: 'detectExternalRefs'; keys: string[] | null };
 
 export type OpDescriptor = OpFilterDescriptor | OpClassifyDescriptor | OpDetectExternalRefsDescriptor;
+
+export type State = 'array' | 'object';
+
+export type ThenParam<TState> = TState extends 'array'
+  ? ExtractedLink[]
+  : { [key: string]: ExtractedLink[] };
