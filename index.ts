@@ -1,67 +1,19 @@
-import { dirname, isAbsolute, join, relative } from "node:path";
 import { extractLinks } from "./src/extractor";
+import { dirname, join } from "node:path";
 import { ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDetectExternalRefsDescriptor, OpFilterDescriptor } from "./src/types";
-import { isAccessible, mergeFilters, removeTrailSep } from "./src/utils";
+import { isAccessible, mergeFilters } from "./src/utils";
 import fg from 'fast-glob';
 
-type State = 'array' | 'object';
-
-type ThenParam<TState> = TState extends 'array'
-  ? ExtractedLink[]
-  : { [key: string]: ExtractedLink[] };
-
-export { LinkType, LinkTarget, ClassifyType } from './src/types';
-export { extractLinks } from './src/extractor';
-export class LinkHarvester<TState extends State = 'array'> {
-  private base: string;
-  private filePath: string;
-  private otherFilePaths: string[] | null = null;
-  private ops:      OpDescriptor[] = [];
-  private _pending: boolean        = false;
-  private _resolve!: (value: any) => void;
-  private _promise:  Promise<any>;
+class Pipeline {
   private _cache: any = {};
-  private dataList: ExtractedLink[] | null = null;
-
-  constructor(props: { base: string; filePath: string }) {
-    const { base, filePath } = props;
-
-    if (typeof base !== 'string') {
-      throw new Error('Base directory must be a string');
-    }
-
-    if (!isAbsolute(base)) {
-      throw new Error('Base directory must be an absolute path');
-    }
-
-    if (!isAccessible(base)) {
-      throw new Error(`Base directory "${base}" does not exist or is not accessible.`);
-    }
-
-    this.base = removeTrailSep(base);
-
-    if (typeof filePath !== 'string') {
-      throw new Error('The path must be a string.');
-    }
-
-    if (isAbsolute(filePath)) {
-      if (!isAccessible(filePath)) {
-        throw new Error(`The file "${filePath}" does not exist or is not accessible.`);
-      }
-
-      if (!filePath.startsWith(this.base)) {
-        throw new Error(`The file "${filePath}" is outside the base directory.`);
-      }
-
-      this.filePath = relative(this.base, filePath);
-    } else if (isAccessible(join(this.base, filePath))) {
-      this.filePath = removeTrailSep(filePath);
-    } else {
-      throw new Error(`The file "${filePath}" does not exist or is not accessible.`);
-    }
-
-    this._promise = new Promise(resolve => { this._resolve = resolve; });
-  }
+  private dataList: ExtractedLink[] = [];
+  private otherFilePaths: string[] | null = null;
+  protected base!: string;
+  protected filePath!: string;
+  protected _resolve!: (value: any) => void;
+  protected _promise!: Promise<any>;
+  protected ops: any[] = [];
+  protected _pending: boolean = false;
 
   private _getOtherFilePaths() {
     if (!this.otherFilePaths) {
@@ -74,11 +26,11 @@ export class LinkHarvester<TState extends State = 'array'> {
     return this.otherFilePaths;
   }
 
-  private _push(op: OpDescriptor) {
+  protected _push(op: any) {
     this.ops.push(op);
   }
-
-  private _schedule() {
+  
+  protected _schedule() {
     if (this._pending) return;
     this._pending = true;
     Promise.resolve().then(() => {
@@ -93,16 +45,20 @@ export class LinkHarvester<TState extends State = 'array'> {
   }
 
   private async _execute() {
-    if (!this.dataList) {
+    const gatherOp = this.ops[0];
+
+    if (gatherOp.type === 'gather') {
       const absolute = join(this.base, this.filePath);
       this.dataList = await extractLinks(absolute);
     }
 
-    if (!this.ops.length) {
+    let ops = this.ops.slice(1);
+
+    if (!ops.length) {
       return this.dataList;
     }
 
-    const ops = mergeFilters([...this.ops]);
+    ops = mergeFilters([...ops]);
     const opTypeSet = ops.reduce((set, it) => {
       set.add(it.type);
       return set;
@@ -259,59 +215,130 @@ export class LinkHarvester<TState extends State = 'array'> {
     });
   }
 
-  gather(): this {
-    this._schedule();
-    return this;
+  protected then(
+    onFulfilled?: (_value: any) => any,
+    onRejected?: (_reason: any) => never
+  ): Promise<any> {
+    return this._promise.then(onFulfilled, onRejected);
+  }
+}
+
+class DetectPipeline extends Pipeline {
+  protected keys: string[] = [];
+
+  constructor(props: any) {
+    super();
+    this.keys.push(props.key);
+    this.ops = props.ops;
+    this.base = props.base;
+    this.filePath = props.filePath;
+    this._promise = props._promise;
+    this._resolve = props._resolve;
+    this._pending = props._pending;
   }
 
-  filter(predicate: FilterPredicate): LinkHarvester<'array'> {
+  detectExternalRefs() {
+    this._push({ type: 'detectExternalRefs', keys: this.keys });
+    return { then: this.then.bind(this) };
+  }
+}
+
+class ClassificationPipeline extends DetectPipeline {
+  constructor(props: any) {
+    super({
+      ops: props.ops,
+      base: props.base,
+      filePath: props.filePath,
+      _resolve: props._resolve,
+      _promise: props._promise,
+      _pending: props._pending,
+    });
+    this.ops = props.ops;
+    this.base = props.base;
+    this.filePath = props.filePath;
+    this._promise = props._promise;
+    this._resolve = props._resolve;
+    this._pending = props._pending;
+  }
+
+  on(prop: string) {
+    return new DetectPipeline({
+      key: prop,
+      ops: this.ops,
+      base: this.base,
+      filePath: this.filePath,
+      _resolve: this._resolve,
+      _promise: this._promise,
+      _pending: this._pending,
+    });
+  }
+
+  then(...rest: Parameters<typeof this._promise.then>): ReturnType<typeof this._promise.then> {
+    return this._promise.then(...rest);
+  }
+}
+
+class LinkDataPipeline extends Pipeline {
+  constructor(props: any) {
+    super();
+    this.ops = props.ops;
+    this.base = props.base;
+    this.filePath = props.filePath;
+    this._promise = props._promise;
+    this._resolve = props._resolve;
+    this._pending = props._pending;    
+  }
+
+  filter(predicate: FilterPredicate) {
     this._push({ type: 'filter', predicate });
-    return this as any;
+    return new LinkDataPipeline({
+      ops: this.ops,
+      base: this.base,
+      filePath: this.filePath,
+      _resolve: this._resolve,
+      _promise: this._promise,
+      _pending: this._pending,
+    });
   }
 
-  filterBy(type: LinkType): LinkHarvester<'array'>;
-  filterBy(type: LinkTarget): LinkHarvester<'array'>;
-  filterBy(type: any): LinkHarvester<'array'> {
+  filterBy(type: LinkType): LinkDataPipeline;
+  filterBy(type: LinkTarget): LinkDataPipeline;
+  filterBy(type: any) {
     if ([
       LinkType.HtmlAnchor,
       LinkType.HtmlImage,
       LinkType.MarkdownImage,
       LinkType.MarkdownLink,
     ].includes(type)) {
-      this._push({ type: 'filter', predicate: (data) => data.type === type });
-    } else if ([
+      return this.filter((data) => data.type === type);
+    }
+    
+    if ([
       LinkTarget.ExternalPage,
       LinkTarget.ExternalResource,
       LinkTarget.InPageAnchor,
       LinkTarget.LocalResource,
       LinkTarget.Other,
     ].includes(type)) {
-      this._push({ type: 'filter', predicate: (data) => data.linkTarget === type });
-    } else {
-      throw TypeError('The type is not a LinkType or LinkTarget');
+      return this.filter((data) => data.linkTarget === type);
     }
-    return this as any;
+    
+    throw TypeError('The type is not a LinkType or LinkTarget');
   }
 
-  on(key: string): OnProxy<'object'> {
-    return new OnProxy(this as any, key);
-  }
-
-  detectExternalRefs(): LinkHarvester<'object'> {
-    this._push({ type: 'detectExternalRefs', keys: null });
-    return this as any;
-  }
-
-  classify(buckets: Record<string, FilterPredicate | string>): LinkHarvester<'object'> {
+  classify(buckets: Record<string, FilterPredicate | string>) {
     this._push({ type: 'classify', buckets });
-    return {
-      then: this.then.bind(this),
-      on: this.on.bind(this),
-      detectExternalRefs: this.detectExternalRefs.bind(this),
-    } as any;
+    return new ClassificationPipeline({
+      ops: this.ops,
+      base: this.base,
+      filePath: this.filePath,
+      _resolve: this._resolve,
+      _promise: this._promise,
+      _pending: this._pending,
+    });
   }
 
-  classifyBy(type: ClassifyType): LinkHarvester<'object'> {
+  classifyBy(type: ClassifyType) {
     if (type !== ClassifyType.IfAccessable) {
       throw TypeError(`The type must be a ${ClassifyType.IfAccessable}.`)
     }
@@ -329,26 +356,30 @@ export class LinkHarvester<TState extends State = 'array'> {
     });
   }
 
-  // Thenable
-  then<TResult1 = ThenParam<TState>, TResult2 = never>(
-    onFulfilled?: (value: ThenParam<TState>) => TResult1 | PromiseLike<TResult1>,
-    onRejected?: (reason: any) => TResult2 | PromiseLike<TResult2>
-  ): Promise<TResult1 | TResult2> {
-    return this._promise.then(onFulfilled, onRejected);
+  then(...rest: Parameters<typeof this._promise.then>): ReturnType<typeof this._promise.then> {
+    return this._promise.then(...rest);
   }
 }
 
-class OnProxy<TState extends State = 'object'> {
-  constructor(
-    private pipeline: LinkHarvester,
-    private key:      string,
-  ) {}
+export class LinkHarvester extends Pipeline {
+  constructor({ base, filePath }: any) {
+    super();
+    this.base = base;
+    this.filePath = filePath;
+    this._promise = new Promise(resolve => { this._resolve = resolve; });
+  }
 
-  detectExternalRefs(): LinkHarvester<'object'> {
-    (this.pipeline as any)._push({
-      type: 'detectExternalRefs',
-      keys: [this.key],
-    } satisfies OpDescriptor);
-    return this.pipeline as any;
+  gather() {
+    this._push({ type: 'gather' })
+    this._schedule();
+
+    return new LinkDataPipeline({
+      ops: this.ops,
+      base: this.base,
+      filePath: this.filePath,
+      _resolve: this._resolve,
+      _promise: this._promise,
+      _pending: this._pending,
+    });
   }
 }
