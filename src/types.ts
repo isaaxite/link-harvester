@@ -34,15 +34,42 @@ export enum ClassifyType {
   IfAccessable = 'if_accessable',
 }
 
+export enum OpDescriptorType {
+  Gather = 'gather',
+  Filfer = 'filter',
+  Classify = 'classify',
+  DetectExternalRefs = 'detectExternalRefs',
+}
+
 export type FilterPredicate = (item: ExtractedLink) => boolean;
 
-export type OpFilterDescriptor = { type: 'filter';   predicate: FilterPredicate };
+export type OpGatherDescriptor = { type: OpDescriptorType.Gather };
 
-export type OpClassifyDescriptor = { type: 'classify'; buckets: Record<string, FilterPredicate | 'rest'> };
+export type OpFilterDescriptor = { type: OpDescriptorType.Filfer; predicate: FilterPredicate };
 
-export type OpDetectExternalRefsDescriptor = { type: 'detectExternalRefs'; keys: string[] | null };
+export type ClassifyBuckets = Record<string, FilterPredicate | 'rest'>;
 
-export type OpDescriptor = OpFilterDescriptor | OpClassifyDescriptor | OpDetectExternalRefsDescriptor;
+export type OpClassifyDescriptor = { type: OpDescriptorType.Classify; buckets: ClassifyBuckets };
+
+export type OpDetectExternalRefsDescriptor = { type: OpDescriptorType.DetectExternalRefs; keys: string[] | null };
+
+export type OpDescriptor = OpGatherDescriptor | OpFilterDescriptor | OpClassifyDescriptor | OpDetectExternalRefsDescriptor;
+
+export function isOpGatherDescriptor(op: OpDescriptor): op is OpGatherDescriptor {
+  return op.type === OpDescriptorType.Gather;
+}
+
+export function isOpFilterDescriptor(op: OpDescriptor): op is OpFilterDescriptor {
+  return op.type === OpDescriptorType.Filfer;
+}
+
+export function isOpClassifyDescriptor(op: OpDescriptor): op is OpClassifyDescriptor {
+  return op.type === OpDescriptorType.Classify;
+}
+
+export function isOpDetectExternalRefsDescriptor(op: OpDescriptor): op is OpDetectExternalRefsDescriptor {
+  return op.type === OpDescriptorType.DetectExternalRefs;
+}
 
 export type State = 'array' | 'object';
 

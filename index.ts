@@ -1,8 +1,12 @@
 import { extractLinks } from "./src/extractor";
 import { dirname, join } from "node:path";
-import { ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam } from "./src/types";
+import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, isOpDetectExternalRefsDescriptor, isOpGatherDescriptor, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam } from "./src/types";
 import { isAccessible, mergeFilters } from "./src/utils";
 import fg from 'fast-glob';
+
+export { extractLinks } from './src/extractor';
+export { LinkTarget, LinkType, ClassifyType, ExtractedLink } from './src/types';
+
 class Pipeline<TState extends State = 'object'> {
   private _cache: any = {};
   private dataList: ExtractedLink[] = [];
@@ -46,7 +50,7 @@ class Pipeline<TState extends State = 'object'> {
   private async _execute() {
     const gatherOp = this.ops[0];
 
-    if (gatherOp.type === 'gather') {
+    if (isOpGatherDescriptor(gatherOp)) {
       const absolute = join(this.base, this.filePath);
       this.dataList = await extractLinks(absolute);
     }
@@ -63,7 +67,7 @@ class Pipeline<TState extends State = 'object'> {
       return set;
     }, new Set() as Set<string>);
 
-    if (opTypeSet.has('filter') && !opTypeSet.has('classify')) {
+    if (opTypeSet.has(OpDescriptorType.Filfer) && !opTypeSet.has(OpDescriptorType.Classify)) {
       const result: ExtractedLink[] = [];
       const [filter] = ops as [OpFilterDescriptor];
       for (const data of this.dataList) {
@@ -74,7 +78,7 @@ class Pipeline<TState extends State = 'object'> {
     }
 
     const detectExternalRefs = async (key: string, data: ExtractedLink, op: OpDescriptor) => {
-      if (op.type !== 'detectExternalRefs') {
+      if (!isOpDetectExternalRefsDescriptor(op)) {
         return;
       }
 
@@ -97,7 +101,7 @@ class Pipeline<TState extends State = 'object'> {
 
     const handleClassify = async (
       dataList: ExtractedLink[],
-      buckets: Record<string, 'rest' | FilterPredicate>,
+      buckets: ClassifyBuckets,
       opt?: {
         filter?: FilterPredicate;
         detectExternalRefs?: OpDescriptor;
@@ -140,9 +144,9 @@ class Pipeline<TState extends State = 'object'> {
       return result;
     }
 
-    if (!opTypeSet.has('filter') && opTypeSet.has('classify')) {
+    if (!opTypeSet.has(OpDescriptorType.Filfer) && opTypeSet.has(OpDescriptorType.Classify)) {
       const [classify, detectExternalRefs] = ops as [OpClassifyDescriptor, OpDetectExternalRefsDescriptor];
-      const buckets: Record<string, 'rest' | FilterPredicate> = (classify as any).buckets;
+      const buckets: ClassifyBuckets = (classify as any).buckets;
       return await handleClassify(this.dataList, buckets, {
         detectExternalRefs,
       });
@@ -237,7 +241,7 @@ class DetectPipeline<TState extends State = 'object'> extends Pipeline<TState> {
   }
 
   detectExternalRefs() {
-    this._push({ type: 'detectExternalRefs', keys: this.keys });
+    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: this.keys });
     return { then: this.then.bind(this) };
   }
 }
@@ -292,7 +296,7 @@ class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> 
   }
 
   filter(predicate: FilterPredicate) {
-    this._push({ type: 'filter', predicate });
+    this._push({ type: OpDescriptorType.Filfer, predicate });
     return new LinkDataPipeline({
       ops: this.ops,
       base: this.base,
@@ -328,8 +332,8 @@ class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> 
     throw TypeError('The type is not a LinkType or LinkTarget');
   }
 
-  classify(buckets: Record<string, FilterPredicate | 'rest'>): ClassificationPipeline<'object'> {
-    this._push({ type: 'classify', buckets });
+  classify(buckets: ClassifyBuckets): ClassificationPipeline<'object'> {
+    this._push({ type: OpDescriptorType.Classify, buckets });
     return new ClassificationPipeline({
       ops: this.ops,
       base: this.base,
@@ -366,8 +370,6 @@ class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> 
   }
 }
 
-export { extractLinks } from './src/extractor';
-export { LinkTarget, LinkType, ClassifyType, ExtractedLink } from './src/types';
 export class LinkHarvester extends Pipeline {
   constructor({ base, filePath }: any) {
     super();
@@ -377,7 +379,7 @@ export class LinkHarvester extends Pipeline {
   }
 
   gather(): LinkDataPipeline {
-    this._push({ type: 'gather' })
+    this._push({ type: OpDescriptorType.Gather })
     this._schedule();
 
     return new LinkDataPipeline({
