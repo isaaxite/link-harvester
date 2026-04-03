@@ -97,19 +97,19 @@ class Pipeline<TState extends State = 'object'> {
 
     const handleClassify = async (
       dataList: ExtractedLink[],
-      buckets: Record<string, string | FilterPredicate>,
+      buckets: Record<string, 'rest' | FilterPredicate>,
       opt?: {
         filter?: FilterPredicate;
         detectExternalRefs?: OpDescriptor;
       },
     ) => {
       const result: { [key: string]: ExtractedLink[] } = {};
-
       const keys = Object.keys(buckets);
+      const restKeyIdx = keys.findIndex(key => buckets[key] === 'rest');
       let restKey = 'rest';
-      const restKeyIdx = keys.findIndex(key => key === 'rest');
+
       if (restKeyIdx !== -1) {
-        restKey = buckets.rest as string;
+        restKey = keys[restKeyIdx];
         keys.splice(restKeyIdx, 1);
       }
       result[restKey] = [];
@@ -142,7 +142,7 @@ class Pipeline<TState extends State = 'object'> {
 
     if (!opTypeSet.has('filter') && opTypeSet.has('classify')) {
       const [classify, detectExternalRefs] = ops as [OpClassifyDescriptor, OpDetectExternalRefsDescriptor];
-      const buckets: Record<string, string | FilterPredicate> = (classify as any).buckets;
+      const buckets: Record<string, 'rest' | FilterPredicate> = (classify as any).buckets;
       return await handleClassify(this.dataList, buckets, {
         detectExternalRefs,
       });
@@ -328,7 +328,7 @@ class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> 
     throw TypeError('The type is not a LinkType or LinkTarget');
   }
 
-  classify(buckets: Record<string, FilterPredicate | string>): ClassificationPipeline<'object'> {
+  classify(buckets: Record<string, FilterPredicate | 'rest'>): ClassificationPipeline<'object'> {
     this._push({ type: 'classify', buckets });
     return new ClassificationPipeline({
       ops: this.ops,

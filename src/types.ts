@@ -38,7 +38,7 @@ export type FilterPredicate = (item: ExtractedLink) => boolean;
 
 export type OpFilterDescriptor = { type: 'filter';   predicate: FilterPredicate };
 
-export type OpClassifyDescriptor = { type: 'classify'; buckets: Record<string, FilterPredicate | string> };
+export type OpClassifyDescriptor = { type: 'classify'; buckets: Record<string, FilterPredicate | 'rest'> };
 
 export type OpDetectExternalRefsDescriptor = { type: 'detectExternalRefs'; keys: string[] | null };
 
