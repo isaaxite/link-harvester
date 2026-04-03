@@ -358,7 +358,7 @@ class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> 
         const dirPath = dirname(join(this.base, this.filePath));
         return isAccessible(join(dirPath, data.url))
       },
-      rest: 'invalid',
+      invalid: 'rest',
     });
   }
 
