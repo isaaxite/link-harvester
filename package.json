@@ -69,9 +69,10 @@
   },
   "keywords": [
     "markdown",
-    "library",
-    "asset-migration",
-    "file-mover"
+    "link-extractor",
+    "link-parser",
+    "link-classifier",
+    "cross-reference"
   ],
   "author": {
     "name": "isaaxite",
