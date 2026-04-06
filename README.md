@@ -1,8 +1,43 @@
 # link-harvester
 
-A Node.js library for extracting, filtering, and classifying links from Markdown files. Built around a fluent pipeline API, it supports all common Markdown and HTML link syntaxes and can detect cross-file external references for local assets.
+> 📖 [中文文档 (Chinese README)](https://github.com/isaaxite/link-harvester/blob/main/docs/README.zh-CN.md)
 
-[中文文档](./docs/README.zh-CN.md)
+<div align="left">
+  <p>A Node.js library for extracting, filtering, and classifying links from Markdown files. Built around a fluent pipeline API, it supports all common Markdown and HTML link syntaxes and can detect cross-file external references for local assets. </p>
+</div>
+
+<div align="left">
+  <a href="https://www.npmjs.com/package/link-harvester">
+    <img alt="NPM Version" src="https://img.shields.io/npm/v/link-harvester">
+  </a>
+  <a href="https://nodejs.org">
+    <img alt="node" src="https://img.shields.io/node/v/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/blob/main/CHANGELOG.md">
+    <img alt="CHANGELOG" src="https://img.shields.io/badge/changelog-maintained-brightgreen">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/blob/main/LICENSE">
+    <img alt="GitHub License" src="https://img.shields.io/github/license/isaaxite/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester">
+    <img alt="GitHub Created At" src="https://img.shields.io/github/created-at/isaaxite/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester">
+    <img alt="NPM Unpacked Size" src="https://img.shields.io/npm/unpacked-size/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/commits/main/">
+    <img alt="GitHub commit activity" src="https://img.shields.io/github/commit-activity/m/isaaxite/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/commits/main/">
+    <img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/isaaxite/link-harvester">
+  </a>
+  <a href='https://github.com/isaaxite/link-harvester/actions/workflows/unittests.yml'>
+    <img src='https://github.com/isaaxite/link-harvester/actions/workflows/unittests.yml/badge.svg' alt='Test CI Status' />
+  </a>
+  <a href='https://coveralls.io/github/isaaxite/link-harvester'>
+    <img src='https://coveralls.io/repos/github/isaaxite/link-harvester/badge.svg' alt='Coverage Status' />
+  </a>
+</div>
 
 ---
 
@@ -226,4 +261,4 @@ interface ExtractedLink {
 
 ## License
 
-MIT © [isaaxite](https://github.com/isaaxite)
+[MIT](https://github.com/isaaxite/link-harvester/blob/main/LICENSE) © [isaaxite](https://github.com/isaaxite)

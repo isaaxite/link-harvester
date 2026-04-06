@@ -1,8 +1,43 @@
 # link-harvester
 
-一个用于从 Markdown 文件中提取、过滤和分类链接的 Node.js 库。基于流式 Pipeline API 设计，支持所有常见的 Markdown 与 HTML 链接语法，并可检测本地资源在其他 Markdown 文件中的跨文件引用关系。
+> 📖 [English README](https://github.com/isaaxite/link-harvester/blob/main/README.md)
 
-[English](../README.md)
+<div align="left">
+  <p>一个用于从 Markdown 文件中提取、过滤和分类链接的 Node.js 库。基于流式 Pipeline API 设计，支持所有常见的 Markdown 与 HTML 链接语法，并可检测本地资源在其他 Markdown 文件中的跨文件引用关系。</p>
+</div>
+
+<div align="left">
+  <a href="https://www.npmjs.com/package/link-harvester">
+    <img alt="NPM Version" src="https://img.shields.io/npm/v/link-harvester">
+  </a>
+  <a href="https://nodejs.org">
+    <img alt="node" src="https://img.shields.io/node/v/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/blob/main/CHANGELOG.md">
+    <img alt="CHANGELOG" src="https://img.shields.io/badge/changelog-maintained-brightgreen">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/blob/main/LICENSE">
+    <img alt="GitHub License" src="https://img.shields.io/github/license/isaaxite/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester">
+    <img alt="GitHub Created At" src="https://img.shields.io/github/created-at/isaaxite/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester">
+    <img alt="NPM Unpacked Size" src="https://img.shields.io/npm/unpacked-size/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/commits/main/">
+    <img alt="GitHub commit activity" src="https://img.shields.io/github/commit-activity/m/isaaxite/link-harvester">
+  </a>
+  <a href="https://github.com/isaaxite/link-harvester/commits/main/">
+    <img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/isaaxite/link-harvester">
+  </a>
+  <a href='https://github.com/isaaxite/link-harvester/actions/workflows/unittests.yml'>
+    <img src='https://github.com/isaaxite/link-harvester/actions/workflows/unittests.yml/badge.svg' alt='Test CI Status' />
+  </a>
+  <a href='https://coveralls.io/github/isaaxite/link-harvester'>
+    <img src='https://coveralls.io/repos/github/isaaxite/link-harvester/badge.svg' alt='Coverage Status' />
+  </a>
+</div>
 
 ---
 
@@ -226,4 +261,4 @@ interface ExtractedLink {
 
 ## 许可证
 
-MIT © [isaaxite](https://github.com/isaaxite)
+[MIT](https://github.com/isaaxite/link-harvester/blob/main/LICENSE) © [isaaxite](https://github.com/isaaxite)
