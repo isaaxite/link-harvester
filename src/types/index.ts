@@ -13,25 +13,6 @@ export enum LinkTarget {
   Other = 'other',
 }
 
-export function isLinkType(type: LinkType): type is LinkType {
-  return [
-    LinkType.HtmlAnchor,
-    LinkType.HtmlImage,
-    LinkType.MarkdownImage,
-    LinkType.MarkdownLink,
-  ].includes(type);
-}
-
-export function isLinkTarget(type: LinkTarget): type is LinkTarget {
-  return [
-    LinkTarget.ExternalPage,
-    LinkTarget.ExternalResource,
-    LinkTarget.InPageAnchor,
-    LinkTarget.LocalResource,
-    LinkTarget.Other,
-  ].includes(type);
-}
-
 export interface ExtractedLink {
   type: LinkType;
   linkTarget: LinkTarget;
@@ -73,22 +54,6 @@ export type OpClassifyDescriptor = { type: OpDescriptorType.Classify; buckets: C
 export type OpDetectExternalRefsDescriptor = { type: OpDescriptorType.DetectExternalRefs; keys: string[] | null };
 
 export type OpDescriptor = OpGatherDescriptor | OpFilterDescriptor | OpClassifyDescriptor | OpDetectExternalRefsDescriptor;
-
-export function isOpGatherDescriptor(op: OpDescriptor): op is OpGatherDescriptor {
-  return op.type === OpDescriptorType.Gather;
-}
-
-export function isOpFilterDescriptor(op: OpDescriptor): op is OpFilterDescriptor {
-  return op.type === OpDescriptorType.Filfer;
-}
-
-export function isOpClassifyDescriptor(op: OpDescriptor): op is OpClassifyDescriptor {
-  return op.type === OpDescriptorType.Classify;
-}
-
-export function isOpDetectExternalRefsDescriptor(op: OpDescriptor): op is OpDetectExternalRefsDescriptor {
-  return op.type === OpDescriptorType.DetectExternalRefs;
-}
 
 export type State = 'extractLinks' | 'classifyLinks';
 

@@ -1,6 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import { RESOURCE_EXTENSIONS } from "./constants";
-import { FilterPredicate, isOpFilterDescriptor, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDescriptor } from "./types";
+import { FilterPredicate, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDescriptor } from "./types";
+import { isOpFilterDescriptor } from "./types/assert";
 import { sep } from "node:path";
 
 export function isResourceUrl(url: string) {

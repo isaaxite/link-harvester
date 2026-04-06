@@ -1,6 +1,7 @@
 import { extractLinks } from "./src/extractor";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, isOpDetectExternalRefsDescriptor, isOpGatherDescriptor, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, isLinkTarget, isLinkType, LinkHarvesterProps } from "./src/types";
+import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, LinkHarvesterProps } from "./src/types";
+import { isOpDetectExternalRefsDescriptor, isOpGatherDescriptor, isLinkTarget, isLinkType } from "./src/types/assert";
 import { isAccessible, mergeFilters, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
 
@@ -96,77 +97,9 @@ class Pipeline<TState extends State = 'classifyLinks'> {
       return result;
     }
 
-    const detectExternalRefs = async (key: string, data: ExtractedLink, op: OpDescriptor) => {
-      if (!isOpDetectExternalRefsDescriptor(op)) {
-        return;
-      }
-
-      const dirPath = dirname(join(this.base, this.filePath));
-      const abs = join(dirPath, data.url);
-
-      if (!op.keys) {
-        const refs = await this._detectExternalRefs(abs);
-        return refs;
-      }
-
-      if (op.keys && !op.keys.includes(key)) {
-        return;
-      }
-
-      const refs = await this._detectExternalRefs(abs) || [];
-      data.externalRefs = refs;
-      return refs;
-    };
-
-    const handleClassify = async (
-      dataList: ExtractedLink[],
-      buckets: ClassifyBuckets,
-      opt?: {
-        filter?: FilterPredicate;
-        detectExternalRefs?: OpDescriptor;
-      },
-    ) => {
-      const result: { [key: string]: ExtractedLink[] } = {};
-      const keys = Object.keys(buckets);
-      const restKeyIdx = keys.findIndex(key => buckets[key] === 'rest');
-      let restKey = 'rest';
-
-      if (restKeyIdx !== -1) {
-        restKey = keys[restKeyIdx];
-        keys.splice(restKeyIdx, 1);
-      }
-      result[restKey] = [];
-
-      for (const data of dataList) {
-        if (opt?.filter && !opt.filter(data)) {
-          continue;
-        }
-
-        let hasRest = true;
-        for (const key of keys) {
-          const filter = buckets[key] as FilterPredicate;
-          if (filter(data)) {
-            if (!result[key]) { result[key] = []; }
-            hasRest = false;
-
-            if (opt?.detectExternalRefs) {
-              await detectExternalRefs(key, data, opt.detectExternalRefs);
-            }
-            result[key].push(data);
-          }
-        }
-        if (hasRest) {
-          result[restKey].push(data);
-        }
-      }
-
-      return result;
-    };
-
     if (!opTypeSet.has(OpDescriptorType.Filfer) && opTypeSet.has(OpDescriptorType.Classify)) {
       const [classify, detectExternalRefs] = ops as [OpClassifyDescriptor, OpDetectExternalRefsDescriptor];
-      const buckets: ClassifyBuckets = (classify as any).buckets;
-      return await handleClassify(this.dataList, buckets, {
+      return await this._executeClassify(this.dataList, classify.buckets, {
         detectExternalRefs,
       });
     }
@@ -174,17 +107,81 @@ class Pipeline<TState extends State = 'classifyLinks'> {
     const [
       filter,
       classify,
-      itDetectExternalRefs,
+      detectExternalRefs,
     ] = ops as [
       OpFilterDescriptor,
       OpClassifyDescriptor,
       OpDetectExternalRefsDescriptor,
     ];
 
-    return await handleClassify(this.dataList, classify.buckets, {
+    return await this._executeClassify(this.dataList, classify.buckets, {
       filter: filter.predicate,
-      detectExternalRefs: itDetectExternalRefs,
+      detectExternalRefs,
     });
+  }
+
+  private async _executeClassify(
+    dataList: ExtractedLink[],
+    buckets: ClassifyBuckets,
+    opt?: {
+      filter?: FilterPredicate;
+      detectExternalRefs?: OpDescriptor;
+    },
+  ) {
+    const result: { [key: string]: ExtractedLink[] } = {};
+    const keys = Object.keys(buckets);
+    const restKeyIdx = keys.findIndex(key => buckets[key] === 'rest');
+    let restKey = 'rest';
+
+    if (restKeyIdx !== -1) {
+      restKey = keys[restKeyIdx];
+      keys.splice(restKeyIdx, 1);
+    }
+    result[restKey] = [];
+
+    for (const data of dataList) {
+      if (opt?.filter && !opt.filter(data)) {
+        continue;
+      }
+
+      let hasRest = true;
+      for (const key of keys) {
+        const filter = buckets[key] as FilterPredicate;
+        if (!filter(data)) { continue; }
+
+        if (!result[key]) { result[key] = []; }
+        hasRest = false;
+
+        if (opt?.detectExternalRefs) {
+          data.externalRefs = await this._execDetectExternalRefs(key, data, opt.detectExternalRefs);
+        }
+        result[key].push(data);
+      }
+      if (hasRest) {
+        result[restKey].push(data);
+      }
+    }
+
+    return result;
+  }
+
+  private async _execDetectExternalRefs(key: string, data: ExtractedLink, op: OpDescriptor) {
+    if (!isOpDetectExternalRefsDescriptor(op)) {
+      return [];
+    }
+
+    const dirPath = dirname(join(this.base, this.filePath));
+    const abs = join(dirPath, data.url);
+
+    if (!op.keys) {
+      return await this._detectExternalRefs(abs) || [];
+    }
+
+    if (op.keys && !op.keys.includes(key)) {
+      return [];
+    }
+
+    return await this._detectExternalRefs(abs) || [];
   }
 
   private async _detectExternalRefs(assetAbsPath: string) {
