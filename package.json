@@ -1,6 +1,6 @@
 {
   "name": "link-harvester",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "A Node.js library for extracting, filtering, and classifying links from Markdown files, with cross-file local reference detection.",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
