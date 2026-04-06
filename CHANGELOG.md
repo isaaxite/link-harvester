@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/isaaxite/link-harvester/compare/v1.0.0...v1.0.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* keywords ([3974603](https://github.com/isaaxite/link-harvester/commit/3974603cdd36e30588334089c5906825e4144dc2))
+
 ## 1.0.0 (2026-04-06)
 
 
