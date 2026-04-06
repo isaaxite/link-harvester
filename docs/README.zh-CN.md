@@ -172,17 +172,27 @@ await harvester.gather().filterBy(LinkTarget.ExternalPage);
 
 ### `.classify(buckets)` → `ClassificationPipeline`
 
-将链接分组到命名桶中。每个 key 对应一个断言函数，或特殊字符串 `'rest'`。不匹配任何断言的链接会落入 `rest` 桶。
+将链接分组到命名桶中。每个 key 对应一个断言函数，或特殊字符串 `'rest'`——值为 `'rest'` 的 key 会成为兜底桶，收集所有不匹配任何断言的链接。若没有任何 key 的值为 `'rest'`，不匹配的链接默认收集到名为 `'rest'` 的桶中。
+
+兜底桶的键名可以自定义——只要某个 key 的值是 `'rest'`，它就成为兜底桶，键名本身不受限制：
 
 ```js
+// 使用默认键名 rest
 const { images, links, rest } = await harvester.gather().classify({
   images: (l) => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
   links:  (l) => l.type === LinkType.MarkdownLink  || l.type === LinkType.HtmlAnchor,
   rest: 'rest',
 });
+ 
+// 自定义兜底桶键名
+const { accessible, invalid } = await harvester.gather().classify({
+  accessible: (l) => l.linkTarget === LinkTarget.LocalResource,
+  invalid: 'rest',   // 不匹配的链接落入 "invalid" 桶
+});
 ```
 
 **入参校验**——以下情况抛出 `TypeError`：
+
 - `buckets` 不是普通对象
 - `buckets` 为空对象
 - 超过一个值为字符串 `'rest'`

@@ -172,17 +172,27 @@ Throws `TypeError` if `type` is not a valid `LinkType` or `LinkTarget`.
 
 ### `.classify(buckets)` → `ClassificationPipeline`
 
-Splits links into named buckets. Each key maps to a predicate function or the special string `'rest'`. Items that do not match any named predicate fall into the `rest` bucket.
+Splits links into named buckets. Each key maps to a predicate function, or the special string `'rest'` which marks that key as the catch-all bucket for unmatched items. If no key is marked `'rest'`, unmatched items are collected under the default key `'rest'`.
+
+The rest key name is fully customisable — any key whose value is `'rest'` becomes the catch-all, regardless of its name:
 
 ```js
+// Default rest key name
 const { images, links, rest } = await harvester.gather().classify({
   images: (l) => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
   links:  (l) => l.type === LinkType.MarkdownLink  || l.type === LinkType.HtmlAnchor,
   rest: 'rest',
 });
+
+// Custom rest key name
+const { accessible, invalid } = await harvester.gather().classify({
+  accessible: (l) => l.linkTarget === LinkTarget.LocalResource,
+  invalid: 'rest',   // unmatched items go here under the key "invalid"
+});
 ```
 
 **Validation** — throws `TypeError` if:
+
 - `buckets` is not a plain object
 - `buckets` is empty
 - More than one value is the string `'rest'`
