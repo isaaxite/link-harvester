@@ -12,3 +12,5 @@ export const RESOURCE_EXTENSIONS = new Set([
   // Common font formats
   'woff', 'woff2', 'ttf', 'otf',
 ]);
+
+export const REST_KEY = 'rest' as const;

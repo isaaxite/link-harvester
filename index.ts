@@ -4,7 +4,9 @@ import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, LinkTarg
 import { isOpDetectExternalRefsDescriptor, isOpGatherDescriptor, isLinkTarget, isLinkType } from "./src/types/assert";
 import { isAccessible, mergeFilters, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
+import { REST_KEY } from "./src/constants";
 
+export { REST_KEY } from "./src/constants";
 export { extractLinks } from './src/extractor';
 export { LinkTarget, LinkType, ClassifyType, ExtractedLink, LinkHarvesterProps } from './src/types';
 
@@ -130,8 +132,8 @@ class Pipeline<TState extends State = 'classifyLinks'> {
   ) {
     const result: { [key: string]: ExtractedLink[] } = {};
     const keys = Object.keys(buckets);
-    const restKeyIdx = keys.findIndex(key => buckets[key] === 'rest');
-    let restKey = 'rest';
+    const restKeyIdx = keys.findIndex(key => buckets[key] === REST_KEY);
+    let restKey: string = REST_KEY;
 
     if (restKeyIdx !== -1) {
       restKey = keys[restKeyIdx];
@@ -328,11 +330,11 @@ class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<T
       throw new TypeError('The buckets must not be empty.');
     }
     const values = Object.values(buckets);
-    const restCount = values.filter(v => v === 'rest').length;
+    const restCount = values.filter(v => v === REST_KEY).length;
     if (restCount > 1) {
       throw new TypeError('The buckets must have at most one "rest" value.');
     }
-    const invalidEntry = values.find(v => v !== 'rest' && typeof v !== 'function');
+    const invalidEntry = values.find(v => v !== REST_KEY && typeof v !== 'function');
     if (invalidEntry !== undefined) {
       throw new TypeError('Each bucket value must be a predicate function or the string "rest".');
     }
@@ -342,7 +344,7 @@ class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<T
 
   classifyBy(type: ClassifyType): ClassificationPipeline<{
     accessible: FilterPredicate;
-    invalid: 'rest';
+    invalid: typeof REST_KEY;
   }> {
     if (type !== ClassifyType.IfAccessable) {
       throw new TypeError(`The type must be a ${ClassifyType.IfAccessable}.`);
@@ -356,7 +358,7 @@ class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<T
         const dirPath = dirname(join(this.base, this.filePath));
         return isAccessible(join(dirPath, data.url));
       },
-      invalid: 'rest',
+      invalid: REST_KEY,
     });
   }
 
