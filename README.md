@@ -96,6 +96,21 @@ for (const item of result.docs) {
 }
 ```
 
+### CommonJS
+ 
+```js
+const { LinkHarvester, LinkType, LinkTarget } = require('link-harvester');
+ 
+const harvester = new LinkHarvester({
+  base: '/absolute/path/to/project',
+  filePath: 'docs/guide.md',
+});
+ 
+const links = await harvester.gather();
+```
+
+All APIs documented below are available in both ESM and CommonJS.
+
 ---
 
 ## API

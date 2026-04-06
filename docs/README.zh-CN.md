@@ -67,7 +67,7 @@ npm install link-harvester
 import { LinkHarvester, LinkType, LinkTarget } from 'link-harvester';
 
 const harvester = new LinkHarvester({
-  base: '/项目的绝对路径',
+  base: '/absolute/path/to/project',
   filePath: 'docs/guide.md',   // 相对于 base 的路径，或绝对路径
 });
 
@@ -95,6 +95,21 @@ for (const item of result.docs) {
   console.log(item.url, '← 被以下文件引用：', item.externalRefs);
 }
 ```
+
+### CommonJS
+
+```js
+const { LinkHarvester, LinkType, LinkTarget } = require('link-harvester');
+ 
+const harvester = new LinkHarvester({
+  base: '/absolute/path/to/project',
+  filePath: 'docs/guide.md',
+});
+ 
+const links = await harvester.gather();
+```
+
+以下所有 API 均支持 ESM 与 CommonJS 两种方式使用。
 
 ---
 
