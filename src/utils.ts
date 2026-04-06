@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { RESOURCE_EXTENSIONS } from "./constants";
-import { FilterPredicate, LinkTarget, OpDescriptor } from "./types";
+import { FilterPredicate, isOpFilterDescriptor, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDescriptor } from "./types";
 import { sep } from "node:path";
 
 export function isResourceUrl(url: string) {
@@ -69,20 +69,20 @@ export function mergeFilters(ops: OpDescriptor[]) {
   let i = 0;
 
   while (i < ops.length) {
-    if (ops[i].type !== 'filter') {
+    if (!isOpFilterDescriptor(ops[i])) {
       result.push(ops[i++]);
       continue; 
     }
 
     const predicates: Array<FilterPredicate> = [];
 
-    while (i < ops.length && ops[i].type === 'filter') {
-      const op = ops[i++];
-      predicates.push((op as any).predicate);
+    while (i < ops.length && isOpFilterDescriptor(ops[i])) {
+      const op = ops[i++] as OpFilterDescriptor;
+      predicates.push(op.predicate);
     }
 
     result.push({
-      type: 'filter',
+      type: OpDescriptorType.Filfer,
       predicate: x => [...predicates].every(p => p(x)),
     });
   }

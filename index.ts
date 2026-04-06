@@ -1,22 +1,42 @@
 import { extractLinks } from "./src/extractor";
-import { dirname, join } from "node:path";
-import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, isOpDetectExternalRefsDescriptor, isOpGatherDescriptor, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam } from "./src/types";
-import { isAccessible, mergeFilters } from "./src/utils";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, isOpDetectExternalRefsDescriptor, isOpGatherDescriptor, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, isLinkTarget, isLinkType, LinkHarvesterProps } from "./src/types";
+import { isAccessible, mergeFilters, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
 
 export { extractLinks } from './src/extractor';
-export { LinkTarget, LinkType, ClassifyType, ExtractedLink } from './src/types';
+export { LinkTarget, LinkType, ClassifyType, ExtractedLink, LinkHarvesterProps } from './src/types';
 
-class Pipeline<TState extends State = 'object'> {
+class Pipeline<TState extends State = 'classifyLinks'> {
   private _cache: any = {};
   private dataList: ExtractedLink[] = [];
   private otherFilePaths: string[] | null = null;
   protected base!: string;
   protected filePath!: string;
-  protected _resolve!: (value: any) => void;
+  private _resolve!: (value: any) => void;
   protected _promise!: Promise<any>;
-  protected ops: any[] = [];
-  protected _pending: boolean = false;
+  private ops: any[] = [];
+  private _pending: boolean = false;
+
+  protected get _shared(): PipelineShared {
+    return {
+      ops: this.ops,
+      base: this.base,
+      filePath: this.filePath,
+      _resolve: this._resolve,
+      _promise: this._promise,
+      _pending: this._pending,
+    };
+  }
+
+  protected set _shared(props: PipelineShared) {
+    this.ops = props.ops;
+    this.base = props.base;
+    this.filePath = props.filePath;
+    this._promise = props._promise;
+    this._resolve = props._resolve;
+    this._pending = props._pending;
+  }
 
   private _getOtherFilePaths() {
     if (!this.otherFilePaths) {
@@ -25,14 +45,13 @@ class Pipeline<TState extends State = 'object'> {
         cwd: this.base,
       });
     }
-
     return this.otherFilePaths;
   }
 
   protected _push(op: any) {
     this.ops.push(op);
   }
-  
+
   protected _schedule() {
     if (this._pending) return;
     this._pending = true;
@@ -129,7 +148,7 @@ class Pipeline<TState extends State = 'object'> {
           if (filter(data)) {
             if (!result[key]) { result[key] = []; }
             hasRest = false;
-            
+
             if (opt?.detectExternalRefs) {
               await detectExternalRefs(key, data, opt.detectExternalRefs);
             }
@@ -142,7 +161,7 @@ class Pipeline<TState extends State = 'object'> {
       }
 
       return result;
-    }
+    };
 
     if (!opTypeSet.has(OpDescriptorType.Filfer) && opTypeSet.has(OpDescriptorType.Classify)) {
       const [classify, detectExternalRefs] = ops as [OpClassifyDescriptor, OpDetectExternalRefsDescriptor];
@@ -183,11 +202,9 @@ class Pipeline<TState extends State = 'object'> {
           }
           return ref;
         }, ref);
-
         return ref;
       };
 
-      // Check cache first to avoid redundant file processing
       if (this._cache[curMdFilePath]) {
         return Promise.resolve(getRef(this._cache[curMdFilePath]));
       }
@@ -198,10 +215,7 @@ class Pipeline<TState extends State = 'object'> {
       for (const item of links) {
         if (item.linkTarget !== LinkTarget.LocalResource) { continue; }
         const absolute = join(dirname(filePath), item.url);
-        linkDataArr.push({
-          ...item,
-          absolute,
-        })
+        linkDataArr.push({ ...item, absolute });
       }
       this._cache[curMdFilePath] = linkDataArr;
       return Promise.resolve(getRef(linkDataArr));
@@ -226,127 +240,115 @@ class Pipeline<TState extends State = 'object'> {
   }
 }
 
-class DetectPipeline<TState extends State = 'object'> extends Pipeline<TState> {
-  protected keys: string[] = [];
-
-  constructor(props: any) {
+class ThenPipeline<TConfig extends Record<string, any> = any> extends Pipeline<'classifyLinks'> {
+  constructor(shared: PipelineShared) {
     super();
-    this.keys.push(props.key);
-    this.ops = props.ops;
-    this.base = props.base;
-    this.filePath = props.filePath;
-    this._promise = props._promise;
-    this._resolve = props._resolve;
-    this._pending = props._pending;
+    this._shared = shared;
   }
 
-  detectExternalRefs() {
-    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: this.keys });
-    return { then: this.then.bind(this) };
-  }
-}
-
-class ClassificationPipeline<TState extends State = 'object'> extends DetectPipeline<TState> {
-  constructor(props: any) {
-    super({
-      ops: props.ops,
-      base: props.base,
-      filePath: props.filePath,
-      _resolve: props._resolve,
-      _promise: props._promise,
-      _pending: props._pending,
-    });
-    this.ops = props.ops;
-    this.base = props.base;
-    this.filePath = props.filePath;
-    this._promise = props._promise;
-    this._resolve = props._resolve;
-    this._pending = props._pending;
-  }
-
-  on(prop: string) {
-    return new DetectPipeline({
-      key: prop,
-      ops: this.ops,
-      base: this.base,
-      filePath: this.filePath,
-      _resolve: this._resolve,
-      _promise: this._promise,
-      _pending: this._pending,
-    });
-  }
-
-  then<TResult1 = ThenParam<TState>, TResult2 = never>(
-    onFulfilled?: (value: ThenParam<TState>) => TResult1 | PromiseLike<TResult1>,
-    onRejected?: (reason: any) => TResult2 | PromiseLike<TResult2>
-  ): Promise<TResult1 | TResult2> {
+  then<TResult>(
+    onFulfilled?: (value: Prettify<InferClassifyResult<TConfig>>) => TResult | PromiseLike<TResult>,
+    onRejected?: (reason: any) => never
+  ): Promise<TResult> {
     return this._promise.then(onFulfilled, onRejected);
   }
 }
 
-class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> {
-  constructor(props: any) {
+class DetectPipeline<TResultType extends Record<string, ExtractedLink[]> = any> extends Pipeline<'classifyLinks'> {
+  protected keys: string[] = [];
+
+  constructor(props: { key: string; shared: PipelineShared }) {
     super();
-    this.ops = props.ops;
-    this.base = props.base;
-    this.filePath = props.filePath;
-    this._promise = props._promise;
-    this._resolve = props._resolve;
-    this._pending = props._pending;    
+    this.keys.push(props.key);
+    this._shared = props.shared;
   }
 
-  filter(predicate: FilterPredicate) {
-    this._push({ type: OpDescriptorType.Filfer, predicate });
-    return new LinkDataPipeline({
-      ops: this.ops,
-      base: this.base,
-      filePath: this.filePath,
-      _resolve: this._resolve,
-      _promise: this._promise,
-      _pending: this._pending,
+  detectExternalRefs(): ThenPipeline<TResultType> {
+    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: this.keys });
+    return new ThenPipeline(this._shared);
+  }
+}
+
+class ClassificationPipeline<TConfig extends Record<string, any> = any> extends Pipeline<'classifyLinks'> {
+  constructor(shared: PipelineShared) {
+    super();
+    this._shared = shared;
+  }
+
+  on<K extends keyof InferClassifyResult<TConfig>>(prop: K): DetectPipeline<InferClassifyResult<TConfig>> {
+    return new DetectPipeline<InferClassifyResult<TConfig>>({
+      key: prop as string,
+      shared: this._shared,
     });
   }
 
-  filterBy(type: LinkType): LinkDataPipeline;
-  filterBy(type: LinkTarget): LinkDataPipeline;
-  filterBy(type: any) {
-    if ([
-      LinkType.HtmlAnchor,
-      LinkType.HtmlImage,
-      LinkType.MarkdownImage,
-      LinkType.MarkdownLink,
-    ].includes(type)) {
+  detectExternalRefs(): ThenPipeline<InferClassifyResult<TConfig>> {
+    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: null });
+    return new ThenPipeline(this._shared);
+  }
+
+  then<TResult>(
+    onFulfilled?: (value: Prettify<InferClassifyResult<TConfig>>) => TResult | PromiseLike<TResult>,
+    onRejected?: (reason: any) => never
+  ): Promise<TResult> {
+    return this._promise.then(onFulfilled, onRejected);
+  }
+}
+
+class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<TState> {
+  constructor(shared: PipelineShared) {
+    super();
+    this._shared = shared;
+  }
+
+  filter(predicate: FilterPredicate): LinkDataPipeline<'extractLinks'> {
+    if (typeof predicate !== 'function') {
+      throw new TypeError('The predicate must be a function.');
+    }
+    this._push({ type: OpDescriptorType.Filfer, predicate });
+    return new LinkDataPipeline(this._shared);
+  }
+
+  filterBy(type: LinkType): LinkDataPipeline<'extractLinks'>;
+  filterBy(type: LinkTarget): LinkDataPipeline<'extractLinks'>;
+  filterBy(type: any): LinkDataPipeline<'extractLinks'> {
+    if (isLinkType(type)) {
       return this.filter((data) => data.type === type);
     }
-    
-    if ([
-      LinkTarget.ExternalPage,
-      LinkTarget.ExternalResource,
-      LinkTarget.InPageAnchor,
-      LinkTarget.LocalResource,
-      LinkTarget.Other,
-    ].includes(type)) {
+
+    if (isLinkTarget(type)) {
       return this.filter((data) => data.linkTarget === type);
     }
-    
-    throw TypeError('The type is not a LinkType or LinkTarget');
+
+    throw new TypeError('The type is not a LinkType or LinkTarget');
   }
 
-  classify(buckets: ClassifyBuckets): ClassificationPipeline<'object'> {
+  classify<TConfig extends ClassifyBuckets>(buckets: TConfig): ClassificationPipeline<TConfig> {
+    if (typeof buckets !== 'object' || buckets === null || Array.isArray(buckets)) {
+      throw new TypeError('The buckets must be a plain object.');
+    }
+    if (Object.keys(buckets).length === 0) {
+      throw new TypeError('The buckets must not be empty.');
+    }
+    const values = Object.values(buckets);
+    const restCount = values.filter(v => v === 'rest').length;
+    if (restCount > 1) {
+      throw new TypeError('The buckets must have at most one "rest" value.');
+    }
+    const invalidEntry = values.find(v => v !== 'rest' && typeof v !== 'function');
+    if (invalidEntry !== undefined) {
+      throw new TypeError('Each bucket value must be a predicate function or the string "rest".');
+    }
     this._push({ type: OpDescriptorType.Classify, buckets });
-    return new ClassificationPipeline({
-      ops: this.ops,
-      base: this.base,
-      filePath: this.filePath,
-      _resolve: this._resolve,
-      _promise: this._promise,
-      _pending: this._pending,
-    });
+    return new ClassificationPipeline<TConfig>(this._shared);
   }
 
-  classifyBy(type: ClassifyType) {
+  classifyBy(type: ClassifyType): ClassificationPipeline<{
+    accessible: FilterPredicate;
+    invalid: 'rest';
+  }> {
     if (type !== ClassifyType.IfAccessable) {
-      throw TypeError(`The type must be a ${ClassifyType.IfAccessable}.`)
+      throw new TypeError(`The type must be a ${ClassifyType.IfAccessable}.`);
     }
 
     return this.classify({
@@ -354,9 +356,8 @@ class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> 
         if (data.linkTarget !== LinkTarget.LocalResource) {
           return false;
         }
-
         const dirPath = dirname(join(this.base, this.filePath));
-        return isAccessible(join(dirPath, data.url))
+        return isAccessible(join(dirPath, data.url));
       },
       invalid: 'rest',
     });
@@ -371,24 +372,51 @@ class LinkDataPipeline<TState extends State = 'array'> extends Pipeline<TState> 
 }
 
 export class LinkHarvester extends Pipeline {
-  constructor({ base, filePath }: any) {
+  constructor({ base, filePath }: LinkHarvesterProps) {
     super();
-    this.base = base;
-    this.filePath = filePath;
-    this._promise = new Promise(resolve => { this._resolve = resolve; });
+
+    if (typeof base !== 'string') {
+      throw new Error('Base directory must be a string');
+    }
+
+    if (!isAbsolute(base)) {
+      throw new Error('Base directory must be an absolute path');
+    }
+
+    if (!isAccessible(base)) {
+      throw new Error(`Base directory "${base}" does not exist or is not accessible.`);
+    }
+
+    const shared = this._shared;
+    shared.base = removeTrailSep(base);
+
+    if (typeof filePath !== 'string') {
+      throw new Error('The path must be a string.');
+    }
+
+    if (isAbsolute(filePath)) {
+      if (!isAccessible(filePath)) {
+        throw new Error(`The file "${filePath}" does not exist or is not accessible.`);
+      }
+
+      if (!filePath.startsWith(shared.base)) {
+        throw new Error(`The file "${filePath}" is outside the base directory.`);
+      }
+
+      shared.filePath = relative(shared.base, filePath);
+    } else if (isAccessible(join(shared.base, filePath))) {
+      shared.filePath = removeTrailSep(filePath);
+    } else {
+      throw new Error(`The file "${filePath}" does not exist or is not accessible.`);
+    }
+
+    shared._promise = new Promise(resolve => { shared._resolve = resolve; });
+    this._shared = shared;
   }
 
-  gather(): LinkDataPipeline {
-    this._push({ type: OpDescriptorType.Gather })
+  gather(): LinkDataPipeline<'extractLinks'> {
+    this._push({ type: OpDescriptorType.Gather });
     this._schedule();
-
-    return new LinkDataPipeline({
-      ops: this.ops,
-      base: this.base,
-      filePath: this.filePath,
-      _resolve: this._resolve,
-      _promise: this._promise,
-      _pending: this._pending,
-    });
+    return new LinkDataPipeline(this._shared);
   }
 }

@@ -13,6 +13,25 @@ export enum LinkTarget {
   Other = 'other',
 }
 
+export function isLinkType(type: LinkType): type is LinkType {
+  return [
+    LinkType.HtmlAnchor,
+    LinkType.HtmlImage,
+    LinkType.MarkdownImage,
+    LinkType.MarkdownLink,
+  ].includes(type);
+}
+
+export function isLinkTarget(type: LinkTarget): type is LinkTarget {
+  return [
+    LinkTarget.ExternalPage,
+    LinkTarget.ExternalResource,
+    LinkTarget.InPageAnchor,
+    LinkTarget.LocalResource,
+    LinkTarget.Other,
+  ].includes(type);
+}
+
 export interface ExtractedLink {
   type: LinkType;
   linkTarget: LinkTarget;
@@ -71,8 +90,42 @@ export function isOpDetectExternalRefsDescriptor(op: OpDescriptor): op is OpDete
   return op.type === OpDescriptorType.DetectExternalRefs;
 }
 
-export type State = 'array' | 'object';
+export type State = 'extractLinks' | 'classifyLinks';
 
-export type ThenParam<TState> = TState extends 'array'
+export type ThenParam<TState> = TState extends 'extractLinks'
   ? ExtractedLink[]
   : { [key: string]: ExtractedLink[] };
+
+export type RestKey<T> = {
+  [K in keyof T]: T[K] extends 'rest' ? K : never;
+}[keyof T];
+
+export type NonRestKeys<T> = {
+  [K in keyof T]: T[K] extends 'rest' ? never : K;
+}[keyof T];
+
+export type InferClassifyResult<T> = Prettify<
+  {
+    [K in NonRestKeys<T>]: ExtractedLink[];
+  } & {
+    [K in RestKey<T>]: ExtractedLink[];
+  }
+>;
+
+export type Prettify<T> = {
+  [K in keyof T]: T[K];
+} & {};
+
+export interface PipelineShared {
+  ops: OpDescriptor[];
+  base: string;
+  filePath: string;
+  _resolve: (value: any) => void;
+  _promise: Promise<any>;
+  _pending: boolean;
+}
+
+export interface LinkHarvesterProps {
+  base: string;
+  filePath: string;
+}
