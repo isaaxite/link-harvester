@@ -1,4 +1,5 @@
-import { LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, OpGatherDescriptor } from "./index";
+import { getInvokedChainStr } from "../utils";
+import { InvokedChain, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, OpGatherDescriptor } from "./index";
 
 export function isLinkType(type: LinkType): type is LinkType {
   return [
@@ -33,4 +34,58 @@ export function isOpClassifyDescriptor(op: OpDescriptor): op is OpClassifyDescri
 
 export function isOpDetectExternalRefsDescriptor(op: OpDescriptor): op is OpDetectExternalRefsDescriptor {
   return op.type === OpDescriptorType.DetectExternalRefs;
+}
+
+export class InvokedChainAssert {
+  constructor(
+    private invokedChainStr: InvokedChain
+  ) {}
+
+  isFInvokeChain(ops: OpDescriptor[]): ops is [OpFilterDescriptor] {
+    return this.invokedChainStr === InvokedChain.F;
+  }
+
+  isDInvokeChain(ops: OpDescriptor[]): ops is [OpDetectExternalRefsDescriptor] {
+    return this.invokedChainStr === InvokedChain.D;
+  }
+
+  isDFInvokeChain(ops: OpDescriptor[]): ops is [OpDetectExternalRefsDescriptor, OpFilterDescriptor] {
+    return this.invokedChainStr === InvokedChain.DF;
+  }
+
+  isFDInvokeChain(ops: OpDescriptor[]): ops is [OpFilterDescriptor, OpDetectExternalRefsDescriptor] {
+    return this.invokedChainStr === InvokedChain.FD;
+  }
+
+  isFDFInvokeChain(ops: OpDescriptor[]): ops is [OpFilterDescriptor, OpDetectExternalRefsDescriptor, OpFilterDescriptor] {
+    return this.invokedChainStr === InvokedChain.FDF;
+  }
+
+  isCInvokeChain(ops: OpDescriptor[]): ops is [OpClassifyDescriptor] {
+    return this.invokedChainStr === InvokedChain.C;
+  }
+
+  isCDInvokeChain(ops: OpDescriptor[]): ops is [OpClassifyDescriptor, OpDetectExternalRefsDescriptor] {
+    return this.invokedChainStr === InvokedChain.CD;
+  }
+
+  isFCInvokeChain(ops: OpDescriptor[]): ops is [OpFilterDescriptor, OpClassifyDescriptor] {
+    return this.invokedChainStr === InvokedChain.FC;
+  }
+
+  isDFCInvokeChain(ops: OpDescriptor[]): ops is [OpDetectExternalRefsDescriptor, OpFilterDescriptor, OpClassifyDescriptor] {
+    return this.invokedChainStr === InvokedChain.DFC;
+  }
+
+  isFCDInvokeChain(ops: OpDescriptor[]): ops is [OpFilterDescriptor, OpClassifyDescriptor, OpDetectExternalRefsDescriptor] {
+    return this.invokedChainStr === InvokedChain.FCD;
+  }
+
+  isFDCInvokeChain(ops: OpDescriptor[]): ops is [OpFilterDescriptor, OpDetectExternalRefsDescriptor, OpClassifyDescriptor] {
+    return this.invokedChainStr === InvokedChain.FDC;
+  }
+
+  isFDFCInvokeChain(ops: OpDescriptor[]): ops is [OpFilterDescriptor, OpDetectExternalRefsDescriptor, OpFilterDescriptor, OpClassifyDescriptor] {
+    return this.invokedChainStr === InvokedChain.FDFC;
+  }
 }

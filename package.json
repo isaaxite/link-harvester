@@ -35,7 +35,8 @@
     "dev": "nodemon --watch index.ts --watch src --ext ts --exec \"npm run build:dev\"",
     "check-publish": "npm pack --dry-run",
     "publish:beta": "npm publish --tag beta --access public",
-    "publish:latest": "npm publish --tag latest --access public"
+    "publish:latest": "npm publish --tag latest --access public",
+    "zip:tests": "zip -r link-harvester.zip index.ts src/ package.json rollup.config.mjs"
   },
   "ava": {
     "files": [

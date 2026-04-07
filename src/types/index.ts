@@ -64,11 +64,11 @@ export type ThenParam<TState> = TState extends 'extractLinks'
   : { [key: string]: ExtractedLink[] };
 
 export type RestKey<T> = {
-  [K in keyof T]: T[K] extends  typeof REST_KEY ? K : never;
+  [K in keyof T]: T[K] extends typeof REST_KEY ? K : never;
 }[keyof T];
 
 export type NonRestKeys<T> = {
-  [K in keyof T]: T[K] extends  typeof REST_KEY ? never : K;
+  [K in keyof T]: T[K] extends typeof REST_KEY ? never : K;
 }[keyof T];
 
 export type InferClassifyResult<T> = Prettify<
@@ -96,3 +96,20 @@ export interface LinkHarvesterProps {
   base: string;
   filePath: string;
 }
+
+export enum InvokedChain {
+  C     = 'c',
+  D     = 'd',
+  F     = 'f',
+  CD    = 'cd',
+  DF    = 'df',
+  FC    = 'fc',
+  FD    = 'fd',
+  DFC   = 'dfc',
+  FCD   = 'fcd',
+  FDF   = 'fdf',
+  FDC   = 'fdc',
+  FDFC  = 'fdfc',
+}
+
+export type FInvokeChain = [OpFilterDescriptor];

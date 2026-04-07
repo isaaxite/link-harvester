@@ -12,14 +12,34 @@ async function main() {
 
   const ret1 = await harvester().gather();
 
+  // d
   const ret2 = await harvester().gather()
+    .detectExternalRefs()
+    .detectExternalRefs();
+
+  // f
+  const ret3 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .filter((item) => [
       LinkType.MarkdownImage,
       LinkType.HtmlImage,
     ].includes(item.type));
 
-  const ret3 = await harvester().gather()
+  // cd
+  const ret4 = await harvester().gather()
+    .classifyBy(ClassifyType.IfAccessable)
+    .detectExternalRefs();
+
+
+  // df
+  const ret5 = await harvester().gather()
+    .detectExternalRefs()
+    .detectExternalRefs()
+    .filterBy(LinkTarget.LocalResource)
+    .filter(it => !it.externalRefs?.length);
+
+  // fc
+  const ret6 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .filter((item) => [
       LinkType.MarkdownImage,
@@ -27,7 +47,34 @@ async function main() {
     ].includes(item.type))
     .classifyBy(ClassifyType.IfAccessable);
 
-  const ret4 = await harvester().gather()
+  // fd
+  const ret7 = await harvester().gather()
+    .filterBy(LinkTarget.LocalResource)
+    .detectExternalRefs()
+    .detectExternalRefs();
+
+  // dfc
+  const ret8 = await harvester().gather()
+    .detectExternalRefs()
+    .detectExternalRefs()
+    .filterBy(LinkTarget.LocalResource)
+    .filter(it => !it.externalRefs?.length)
+    .classifyBy(ClassifyType.IfAccessable)
+    .on('accessible')
+    .detectExternalRefs();
+
+  // fcd
+  const ret10 = await harvester().gather()
+    .filterBy(LinkTarget.LocalResource)
+    .filter((item) => [
+      LinkType.MarkdownImage,
+      LinkType.HtmlImage,
+    ].includes(item.type))
+    .classifyBy(ClassifyType.IfAccessable)
+    .detectExternalRefs();
+  
+  // fcd
+  const ret11 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .filter((item) => [
       LinkType.MarkdownImage,
@@ -37,10 +84,26 @@ async function main() {
     .on('accessible')
     .detectExternalRefs();
 
-  const ret5 = await harvester().gather()
+  // fdf
+  const ret12 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
-    .classifyBy(ClassifyType.IfAccessable)
-    .detectExternalRefs();
+    .detectExternalRefs()
+    .filter(it => !it.externalRefs?.length);
+
+  // fdc
+  const ret13 = await harvester().gather()
+    .filterBy(LinkTarget.LocalResource)
+    .detectExternalRefs()
+    .classify({
+      externalRefs: it => !!it.externalRefs?.length
+    });
+
+  // fdfc
+  const ret14 = await harvester().gather()
+    .filterBy(LinkTarget.LocalResource)
+    .detectExternalRefs()
+    .filter(it => !it.externalRefs?.length)
+    .classifyBy(ClassifyType.IfAccessable);
 
   process.exit(0);
 }

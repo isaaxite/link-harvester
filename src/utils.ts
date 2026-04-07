@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { RESOURCE_EXTENSIONS } from "./constants";
-import { FilterPredicate, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDescriptor } from "./types";
+import { FilterPredicate, InvokedChain, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDescriptor } from "./types";
 import { isOpFilterDescriptor } from "./types/assert";
 import { sep } from "node:path";
 
@@ -65,7 +65,7 @@ export function removeTrailSep(pathStr: string) {
   return pathStr.replace(new RegExp(`${sep}+$`), '');
 }
 
-export function mergeFilters(ops: OpDescriptor[]) {
+function mergeFilters(ops: OpDescriptor[]) {
   const result: OpDescriptor[] = [];
   let i = 0;
 
@@ -88,4 +88,40 @@ export function mergeFilters(ops: OpDescriptor[]) {
     });
   }
   return result;
+}
+
+function dedupeDetectExternalRefs(opArr: OpDescriptor[]) {
+  const result: OpDescriptor[] = [];
+
+  let isDedupe = false;
+  for (const op of opArr) {
+    if (op.type !== OpDescriptorType.DetectExternalRefs) {
+      result.push(op);
+      continue;
+    }
+
+    if (!isDedupe) {
+      isDedupe = true;
+      result.push(op);
+    }
+  }
+
+  return result;
+}
+
+export function optimizeOps(ops: OpDescriptor[]) {
+  let opArr = mergeFilters([...ops]);
+
+  opArr = dedupeDetectExternalRefs(opArr);
+  
+  return opArr;
+}
+
+export function getInvokedChainStr(ops: OpDescriptor[]) {
+  const str: string[] = [];
+  ops.reduce((str, op) => {
+    str.push(op.type[0]);
+    return str;
+  }, str);
+  return str.join('') as InvokedChain;
 }

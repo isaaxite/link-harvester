@@ -1,8 +1,8 @@
 import { extractLinks } from "./src/extractor";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, OpFilterDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, LinkHarvesterProps } from "./src/types";
-import { isOpDetectExternalRefsDescriptor, isOpGatherDescriptor, isLinkTarget, isLinkType } from "./src/types/assert";
-import { isAccessible, mergeFilters, removeTrailSep } from "./src/utils";
+import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, LinkHarvesterProps, InvokedChain } from "./src/types";
+import { isOpGatherDescriptor, isLinkTarget, isLinkType, InvokedChainAssert } from "./src/types/assert";
+import { getInvokedChainStr, isAccessible, optimizeOps, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
 import { REST_KEY } from "./src/constants";
 
@@ -83,107 +83,292 @@ class Pipeline<TState extends State = 'classifyLinks'> {
       return this.dataList;
     }
 
-    ops = mergeFilters([...ops]);
-    const opTypeSet = ops.reduce((set, it) => {
-      set.add(it.type);
-      return set;
-    }, new Set() as Set<string>);
+    ops = optimizeOps([...ops]);
 
-    if (opTypeSet.has(OpDescriptorType.Filfer) && !opTypeSet.has(OpDescriptorType.Classify)) {
-      const result: ExtractedLink[] = [];
-      const [filter] = ops as [OpFilterDescriptor];
+    const invokedChainStr = getInvokedChainStr(ops);
+    const assert = new InvokedChainAssert(invokedChainStr);
+
+    if (invokedChainStr.includes(InvokedChain.C)) {
+      return await this._exeClassifyLinks({ ops, assert });
+    }
+
+    return await this._execExtractLinks({ ops, assert });
+  }
+
+  private async _execExtractLinks({ ops, assert }: {
+    ops: OpDescriptor[];
+    assert: InvokedChainAssert;
+  }) {
+    const result: ExtractedLink[] = [];
+    const dirPath = dirname(join(this.base, this.filePath));
+
+    if (assert.isFInvokeChain(ops)) {
+      const [filter] = ops;
       for (const data of this.dataList) {
         if (!filter.predicate(data)) { continue; }
-        result.push(data);
+        result.push({ ...data });
       }
       return result;
     }
 
-    if (!opTypeSet.has(OpDescriptorType.Filfer) && opTypeSet.has(OpDescriptorType.Classify)) {
-      const [classify, detectExternalRefs] = ops as [OpClassifyDescriptor, OpDetectExternalRefsDescriptor];
-      return await this._executeClassify(this.dataList, classify.buckets, {
-        detectExternalRefs,
-      });
+    if (assert.isDInvokeChain(ops)) {
+      for (const data of this.dataList) {
+        const item = { ...data };
+        if (data.linkTarget === LinkTarget.LocalResource) {
+          const abs = join(dirPath, data.url);
+          item.externalRefs = await this._detectExternalRefs(abs) || [];
+        }
+
+        result.push(item);
+      }
+      return result;
     }
 
-    const [
-      filter,
-      classify,
-      detectExternalRefs,
-    ] = ops as [
-      OpFilterDescriptor,
-      OpClassifyDescriptor,
-      OpDetectExternalRefsDescriptor,
-    ];
+    if (assert.isDFInvokeChain(ops)) {
+      const filter = ops[1];
+      for (const data of this.dataList) {
+        const item = { ...data };
+        if (data.linkTarget === LinkTarget.LocalResource) {
+          const abs = join(dirPath, data.url);
+          item.externalRefs = await this._detectExternalRefs(abs) || [];
+        }
 
-    return await this._executeClassify(this.dataList, classify.buckets, {
-      filter: filter.predicate,
-      detectExternalRefs,
-    });
+        if (!filter.predicate(item)) { continue; }
+        result.push(item);
+      }
+
+      return result;
+    }
+
+    if (assert.isFDInvokeChain(ops)) {
+      const [filter] = ops;
+      for (const data of this.dataList) {
+        if (!filter.predicate(data)) { continue; }
+        if (data.linkTarget === LinkTarget.LocalResource) {
+          const abs = join(dirPath, data.url);
+          data.externalRefs = await this._detectExternalRefs(abs) || [];
+        }
+        result.push({ ...data });
+      }
+
+      return result;
+    }
+
+    if (assert.isFDFInvokeChain(ops)) {
+      const filter = ops[0];
+      const subFilter = ops[2];
+      for (const data of this.dataList) {
+        const item = { ...data };
+        if (!filter.predicate(item)) { continue; }
+        if (data.linkTarget === LinkTarget.LocalResource) {
+          const abs = join(dirPath, data.url);
+          item.externalRefs = await this._detectExternalRefs(abs) || [];
+        }
+        if (!subFilter.predicate(item)) { continue; }
+        result.push(item);
+      }
+
+      return result;
+    }
   }
 
-  private async _executeClassify(
-    dataList: ExtractedLink[],
-    buckets: ClassifyBuckets,
-    opt?: {
-      filter?: FilterPredicate;
-      detectExternalRefs?: OpDescriptor;
-    },
-  ) {
+  private async _exeClassifyLinks({ ops, assert }: {
+    ops: OpDescriptor[];
+    assert: InvokedChainAssert;
+  }) {
     const result: { [key: string]: ExtractedLink[] } = {};
+    const dirPath = dirname(join(this.base, this.filePath));
+    const { buckets } = ops.find(it => it.type === OpDescriptorType.Classify) as OpClassifyDescriptor;
     const keys = Object.keys(buckets);
     const restKeyIdx = keys.findIndex(key => buckets[key] === REST_KEY);
     let restKey: string = REST_KEY;
+
+    const attactExternalRefs = async (item: ExtractedLink) => {
+      if (item.linkTarget === LinkTarget.LocalResource) {
+        item.externalRefs = await this._detectExternalRefs(join(dirPath, item.url)) || [];
+      }
+    };
+
+    const detectExternalRefsFactory = (detectExternalRefs: OpDetectExternalRefsDescriptor) => {
+      return detectExternalRefs.keys?.length ? async (...rest: any) => {
+        const [it, key] = rest as [ExtractedLink, string];
+        if (!detectExternalRefs.keys!.includes(key)) { return; }
+        await attactExternalRefs(it);
+      } : async (...rest: any) => {
+        const [it] = rest as [ExtractedLink];
+        await attactExternalRefs(it);
+      };
+    };
 
     if (restKeyIdx !== -1) {
       restKey = keys[restKeyIdx];
       keys.splice(restKeyIdx, 1);
     }
     result[restKey] = [];
+    keys.reduce((result, key) => {
+      result[key] = [];
+      return result;
+    }, result);
 
-    for (const data of dataList) {
-      if (opt?.filter && !opt.filter(data)) {
-        continue;
-      }
+    if (assert.isCInvokeChain(ops)) {
+      for (const data of this.dataList) {
+        let hasRest = true;
+        for (const key of keys) {
+          const classifyFilter = buckets[key] as FilterPredicate;
+          if (!classifyFilter(data)) { continue; }
 
-      let hasRest = true;
-      for (const key of keys) {
-        const filter = buckets[key] as FilterPredicate;
-        if (!filter(data)) { continue; }
-
-        if (!result[key]) { result[key] = []; }
-        hasRest = false;
-
-        if (opt?.detectExternalRefs) {
-          data.externalRefs = await this._execDetectExternalRefs(key, data, opt.detectExternalRefs);
+          hasRest = false;
+          result[key].push(data);
         }
-        result[key].push(data);
+        if (hasRest) {
+          result[restKey].push(data);
+        }
       }
-      if (hasRest) {
-        result[restKey].push(data);
+      return result;
+    }
+
+    if (assert.isCDInvokeChain(ops)) {
+      const detectExternalRefs = ops[1];
+      const detectExternalRefsAttacher = detectExternalRefsFactory(detectExternalRefs);
+
+      for (const data of this.dataList) {
+        let hasRest = true;
+        const item = { ...data };
+        for (const key of keys) {
+          const classifyFilter = buckets[key] as FilterPredicate;
+          if (!classifyFilter(item)) { continue; }
+
+          await detectExternalRefsAttacher(item, key);
+          result[key].push(item);
+          hasRest = false;
+        }
+        if (hasRest) {
+          result[restKey].push(data);
+        }
       }
+      return result;
     }
 
-    return result;
-  }
-
-  private async _execDetectExternalRefs(key: string, data: ExtractedLink, op: OpDescriptor) {
-    if (!isOpDetectExternalRefsDescriptor(op)) {
-      return [];
+    if (assert.isFCInvokeChain(ops)) {
+      const filter = ops[0];
+      for (const data of this.dataList) {
+        let hasRest = true;
+        if (!filter.predicate(data)) { continue; }
+        for (const key of keys) {
+          const classifyFilter = buckets[key] as FilterPredicate;
+          if (!classifyFilter(data)) { continue; }
+          hasRest = false;
+          result[key].push(data);
+        }
+        if (hasRest) {
+          result[restKey].push(data);
+        }
+      }
+      return result;
     }
 
-    const dirPath = dirname(join(this.base, this.filePath));
-    const abs = join(dirPath, data.url);
+    if (assert.isDFCInvokeChain(ops)) {
+      const filter = ops[1];
+      for (const data of this.dataList) {
+        let hasRest = true;
+        const item = { ...data };
 
-    if (!op.keys) {
-      return await this._detectExternalRefs(abs) || [];
+        await attactExternalRefs(item);
+
+        if (!filter.predicate(item)) { continue; }
+
+        for (const key of keys) {
+          const classifyFilter = buckets[key] as FilterPredicate;
+          if (!classifyFilter(item)) { continue; }
+          hasRest = false;
+          result[key].push(item);
+        }
+        if (hasRest) {
+          result[restKey].push(item);
+        }
+      }
+      return result;
     }
 
-    if (op.keys && !op.keys.includes(key)) {
-      return [];
+    if (assert.isFCDInvokeChain(ops)) {
+      const filter = ops[0];
+      const detectExternalRefs = ops[2];
+      const detectExternalRefsAttacher = detectExternalRefsFactory(detectExternalRefs);
+
+      for (const data of this.dataList) {
+        let hasRest = true;
+        const item = { ...data };
+
+        if (!filter.predicate(item)) { continue; }
+
+        for (const key of keys) {
+          const classifyFilter = buckets[key] as FilterPredicate;
+          if (!classifyFilter(item)) { continue; }
+
+          await detectExternalRefsAttacher(item, key);
+          
+          hasRest = false;
+          result[key].push(item);
+        }
+        if (hasRest) {
+          result[restKey].push(item);
+        }
+      }
+      return result;
     }
 
-    return await this._detectExternalRefs(abs) || [];
+    if (assert.isFDCInvokeChain(ops)) {
+      const filter = ops[0];
+
+      for (const data of this.dataList) {
+        let hasRest = true;
+        const item = { ...data };
+
+        if (!filter.predicate(item)) { continue; }
+
+        await attactExternalRefs(item);
+
+        for (const key of keys) {
+          const classifyFilter = buckets[key] as FilterPredicate;
+          if (!classifyFilter(item)) { continue; }
+          
+          hasRest = false;
+          result[key].push(item);
+        }
+        if (hasRest) {
+          result[restKey].push(item);
+        }
+      }
+      return result;
+    }
+
+    if (assert.isFDFCInvokeChain(ops)) {
+      const filter = ops[0];
+      const subFilter = ops[2];
+
+      for (const data of this.dataList) {
+        let hasRest = true;
+        const item = { ...data };
+
+        if (!filter.predicate(item)) { continue; }
+
+        await attactExternalRefs(item);
+
+        if (!subFilter.predicate(item)) { continue; }
+
+        for (const key of keys) {
+          const classifyFilter = buckets[key] as FilterPredicate;
+          if (!classifyFilter(item)) { continue; }
+          
+          hasRest = false;
+          result[key].push(item);
+        }
+        if (hasRest) {
+          result[restKey].push(item);
+        }
+      }
+      return result;
+    }
   }
 
   private async _detectExternalRefs(assetAbsPath: string) {
@@ -360,6 +545,11 @@ class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<T
       },
       invalid: REST_KEY,
     });
+  }
+
+  detectExternalRefs(): LinkDataPipeline<'extractLinks'> {
+    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: null });
+    return new LinkDataPipeline(this._shared);
   }
 
   then<TResult1 = ThenParam<TState>, TResult2 = never>(

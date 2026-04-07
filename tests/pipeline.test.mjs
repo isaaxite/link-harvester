@@ -36,6 +36,7 @@ import {
   LinkType,
   LinkTarget,
   ClassifyType,
+  REST_KEY,
 } from '../dist/index.mjs';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -581,4 +582,355 @@ test('classify accepts valid buckets with no rest entry', async (t) => {
     rest: 'rest',
   });
   t.true(Array.isArray(result.images));
+});
+
+// ---------------------------------------------------------------------------
+// _execExtractLinks — D 链路
+// gather().detectExternalRefs()  →  对所有 LocalResource 附 externalRefs
+// ---------------------------------------------------------------------------
+
+test('D chain: gather().detectExternalRefs() attaches externalRefs to every LocalResource', async (t) => {
+  const links = await h('refs-target.md').gather().detectExternalRefs();
+  t.true(Array.isArray(links));
+  const locals = links.filter(l => l.linkTarget === LinkTarget.LocalResource);
+  t.true(locals.length > 0);
+  for (const l of locals) {
+    t.true(Array.isArray(l.externalRefs), `externalRefs missing on ${l.url}`);
+  }
+});
+
+test('D chain: non-LocalResource links get no externalRefs', async (t) => {
+  const links = await h('local-resources.md').gather().detectExternalRefs();
+  const nonLocals = links.filter(l => l.linkTarget !== LinkTarget.LocalResource);
+  for (const l of nonLocals) {
+    t.falsy(l.externalRefs);
+  }
+});
+
+test('D chain: file with no local resources returns empty externalRefs everywhere', async (t) => {
+  const links = await h('externals-only.md').gather().detectExternalRefs();
+  t.true(links.every(l => !l.externalRefs || l.externalRefs.length === 0));
+});
+
+// ---------------------------------------------------------------------------
+// _execExtractLinks — FD 链路
+// gather().filter().detectExternalRefs()
+// ---------------------------------------------------------------------------
+
+test('FD chain: filter then detectExternalRefs — only filtered items, with externalRefs on locals', async (t) => {
+  const links = await h('refs-target.md')
+    .gather()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)
+    .detectExternalRefs();
+  t.true(links.every(l => l.linkTarget === LinkTarget.LocalResource));
+  for (const l of links) {
+    t.true(Array.isArray(l.externalRefs));
+  }
+});
+
+test('FD chain: items excluded by filter are absent from result', async (t) => {
+  const all = await h('local-resources.md').gather();
+  const filtered = await h('local-resources.md')
+    .gather()
+    .filter(l => l.type === LinkType.MarkdownImage)
+    .detectExternalRefs();
+  t.true(filtered.every(l => l.type === LinkType.MarkdownImage));
+  t.true(filtered.length < all.length);
+});
+
+// ---------------------------------------------------------------------------
+// _execExtractLinks — DF 链路
+// gather().detectExternalRefs().filter()
+// 注意：D 先运行附 externalRefs，再由 F 过滤
+// ---------------------------------------------------------------------------
+
+test('DF chain: detectExternalRefs then filter — filter sees externalRefs', async (t) => {
+  const links = await h('refs-target.md')
+    .gather()
+    .detectExternalRefs()
+    .filter(l => Array.isArray(l.externalRefs) && l.externalRefs.length > 0);
+  t.true(links.length > 0);
+  t.true(links.every(l => Array.isArray(l.externalRefs) && l.externalRefs.length > 0));
+});
+
+test('DF chain: items not matching post-detect filter are excluded', async (t) => {
+  const links = await h('refs-target.md')
+    .gather()
+    .detectExternalRefs()
+    .filter(() => false);
+  t.deepEqual(links, []);
+});
+
+// ---------------------------------------------------------------------------
+// _execExtractLinks — FDF 链路
+// gather().filter().detectExternalRefs().filter()
+// ---------------------------------------------------------------------------
+
+test('FDF chain: pre-filter → detectExternalRefs → post-filter', async (t) => {
+  const links = await h('refs-target.md')
+    .gather()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)
+    .detectExternalRefs()
+    .filter(l => Array.isArray(l.externalRefs) && l.externalRefs.length > 0);
+  t.true(links.every(l =>
+    l.linkTarget === LinkTarget.LocalResource &&
+    Array.isArray(l.externalRefs) &&
+    l.externalRefs.length > 0,
+  ));
+});
+
+test('FDF chain: pre-filter false → result always empty regardless of post-filter', async (t) => {
+  const links = await h('refs-target.md')
+    .gather()
+    .filter(() => false)
+    .detectExternalRefs()
+    .filter(() => true);
+  t.deepEqual(links, []);
+});
+
+// ---------------------------------------------------------------------------
+// _exeClassifyLinks — C 链路（纯 classify，已有测试但此处显式标注）
+// ---------------------------------------------------------------------------
+
+test('C chain: classify only — all items partitioned, no externalRefs attached', async (t) => {
+  const result = await h('mixed.md').gather().classify({
+    images: l => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
+    rest: REST_KEY,
+  });
+  t.true(Array.isArray(result.images));
+  t.true(Array.isArray(result.rest));
+  t.true(result.images.every(l => !l.externalRefs));
+  t.true(result.rest.every(l => !l.externalRefs));
+});
+
+test('C chain: every bucket is pre-initialised (matched bucket always present in result)', async (t) => {
+  const result = await h('mixed.md').gather().classify({
+    images: () => false,
+    rest: REST_KEY,
+  });
+  // 'images' bucket is initialised even if nothing matches
+  t.true('images' in result);
+  t.deepEqual(result.images, []);
+});
+
+// ---------------------------------------------------------------------------
+// _exeClassifyLinks — CD 链路
+// classify().detectExternalRefs()  (keys = null → all buckets)
+// ---------------------------------------------------------------------------
+
+test('CD chain: classify then detectExternalRefs(keys=null) — matched items in local bucket get externalRefs', async (t) => {
+  const result = await h('refs-target.md')
+    .gather()
+    .classify({
+      local: l => l.linkTarget === LinkTarget.LocalResource,
+      rest: REST_KEY,
+    })
+    .detectExternalRefs();
+  t.true(Array.isArray(result.local));
+  // At least one local item should have externalRefs attached
+  const withRefs = result.local.filter(l => Array.isArray(l.externalRefs));
+  t.true(withRefs.length > 0);
+});
+
+test('CD chain: classify().on(key).detectExternalRefs() — only targeted bucket items get externalRefs', async (t) => {
+  const result = await h('refs-target.md')
+    .gather()
+    .classify({
+      local: l => l.linkTarget === LinkTarget.LocalResource,
+      rest: REST_KEY,
+    })
+    .on('local')
+    .detectExternalRefs();
+  // targeted bucket items have externalRefs
+  t.true(result.local.every(l => Array.isArray(l.externalRefs)));
+  // rest bucket items must NOT have externalRefs set by this call
+  t.true(result.rest.every(l => !l.externalRefs));
+});
+
+// ---------------------------------------------------------------------------
+// _exeClassifyLinks — FC 链路  gather().filter().classify()
+// ---------------------------------------------------------------------------
+
+test('FC chain: filter then classify — only filtered items reach buckets', async (t) => {
+  const result = await h('local-resources.md')
+    .gather()
+    .filter(l => l.type === LinkType.MarkdownImage || l.type === LinkType.MarkdownLink)
+    .classify({
+      images: l => l.type === LinkType.MarkdownImage,
+      rest: REST_KEY,
+    });
+  const all = [...result.images, ...result.rest];
+  t.true(all.every(l =>
+    l.type === LinkType.MarkdownImage || l.type === LinkType.MarkdownLink,
+  ));
+  t.true(result.images.every(l => l.type === LinkType.MarkdownImage));
+});
+
+// ---------------------------------------------------------------------------
+// _exeClassifyLinks — FCD 链路
+// gather().filter().classify().on(key).detectExternalRefs()
+// ---------------------------------------------------------------------------
+
+test('FCD chain: filter → classify → detectExternalRefs on key', async (t) => {
+  const result = await h('refs-target.md')
+    .gather()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)
+    .classify({
+      docs: l => l.url.endsWith('.md'),
+      rest: REST_KEY,
+    })
+    .on('docs')
+    .detectExternalRefs();
+  t.true('docs' in result);
+  t.true(result.docs.every(l => l.url.endsWith('.md') && Array.isArray(l.externalRefs)));
+  t.true(result.rest.every(l => !l.externalRefs));
+});
+
+// ---------------------------------------------------------------------------
+// _exeClassifyLinks — DFC 链路
+// gather().detectExternalRefs().filter().classify()
+// D 先全量附 externalRefs，再 F 过滤，再 C 分桶
+// ---------------------------------------------------------------------------
+
+test('DFC chain: detectExternalRefs → filter → classify', async (t) => {
+  const result = await h('refs-target.md')
+    .gather()
+    .detectExternalRefs()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)
+    .classify({
+      withRefs: l => Array.isArray(l.externalRefs) && l.externalRefs.length > 0,
+      rest: REST_KEY,
+    });
+  t.true('withRefs' in result);
+  t.true('rest' in result);
+  // items in withRefs bucket passed filter and have externalRefs
+  t.true(result.withRefs.every(l =>
+    l.linkTarget === LinkTarget.LocalResource &&
+    Array.isArray(l.externalRefs) &&
+    l.externalRefs.length > 0,
+  ));
+});
+
+// ---------------------------------------------------------------------------
+// _exeClassifyLinks — FDC 链路
+// gather().filter().detectExternalRefs().classify()
+// F 先过滤，D 再附 externalRefs，最后 C 分桶
+// ---------------------------------------------------------------------------
+
+test('FDC chain: filter → detectExternalRefs → classify', async (t) => {
+  const result = await h('refs-target.md')
+    .gather()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)
+    .detectExternalRefs()
+    .classify({
+      referenced: l => Array.isArray(l.externalRefs) && l.externalRefs.length > 0,
+      rest: REST_KEY,
+    });
+  t.true('referenced' in result);
+  // all items went through detect, so LocalResource items have externalRefs
+  const all = [...result.referenced, ...result.rest];
+  t.true(all.every(l => l.linkTarget === LinkTarget.LocalResource));
+  t.true(result.referenced.every(l => Array.isArray(l.externalRefs) && l.externalRefs.length > 0));
+});
+
+// ---------------------------------------------------------------------------
+// _exeClassifyLinks — FDFC 链路
+// gather().filter().detectExternalRefs().filter().classify()
+// ---------------------------------------------------------------------------
+
+test('FDFC chain: pre-filter → detectExternalRefs → post-filter → classify', async (t) => {
+  const result = await h('refs-target.md')
+    .gather()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)  // F
+    .detectExternalRefs()                                     // D
+    .filter(l => Array.isArray(l.externalRefs) && l.externalRefs.length > 0) // F
+    .classify({                                               // C
+      docs: l => l.url.endsWith('.md'),
+      rest: REST_KEY,
+    });
+  t.true('docs' in result);
+  const all = [...result.docs, ...result.rest];
+  // all items: LocalResource, have externalRefs, externalRefs.length > 0
+  t.true(all.every(l =>
+    l.linkTarget === LinkTarget.LocalResource &&
+    Array.isArray(l.externalRefs) &&
+    l.externalRefs.length > 0,
+  ));
+});
+
+// ---------------------------------------------------------------------------
+// optimizeOps — dedupeDetectExternalRefs
+// 重复调用 detectExternalRefs 只保留第一个 D op
+// ---------------------------------------------------------------------------
+
+test('duplicate detectExternalRefs calls are deduped — second D is dropped', async (t) => {
+  // FD chain: two chained detectExternalRefs should behave same as one
+  const once = await h('refs-target.md')
+    .gather()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)
+    .detectExternalRefs();
+
+  const twice = await h('refs-target.md')
+    .gather()
+    .filter(l => l.linkTarget === LinkTarget.LocalResource)
+    .detectExternalRefs()
+    .detectExternalRefs(); // 第二个 D 被 dedupeDetectExternalRefs 去除
+
+  t.deepEqual(
+    once.map(l => ({ url: l.url, refs: l.externalRefs })),
+    twice.map(l => ({ url: l.url, refs: l.externalRefs })),
+  );
+});
+
+test('duplicate detectExternalRefs in classify chain is deduped', async (t) => {
+  const r1 = await h('refs-target.md')
+    .gather()
+    .classify({ local: l => l.linkTarget === LinkTarget.LocalResource, rest: REST_KEY })
+    .on('local')
+    .detectExternalRefs();
+
+  // calling detectExternalRefs twice on ClassificationPipeline — second is deduped
+  const classifyPipeline = h('refs-target.md')
+    .gather()
+    .classify({ local: l => l.linkTarget === LinkTarget.LocalResource, rest: REST_KEY });
+  classifyPipeline.detectExternalRefs(); // push one D
+  const r2 = await classifyPipeline.on('local').detectExternalRefs(); // push second D → deduped
+
+  t.deepEqual(
+    r1.local.map(l => l.url).sort(),
+    r2.local.map(l => l.url).sort(),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// REST_KEY 在 classify 中的语义等价性
+// REST_KEY === 'rest'，两者可互换
+// ---------------------------------------------------------------------------
+
+test('REST_KEY and literal "rest" are interchangeable in classify buckets', async (t) => {
+  const r1 = await h('mixed.md').gather().classify({
+    images: l => l.type === LinkType.MarkdownImage,
+    rest: REST_KEY,
+  });
+  const r2 = await h('mixed.md').gather().classify({
+    images: l => l.type === LinkType.MarkdownImage,
+    rest: 'rest',
+  });
+  t.deepEqual(
+    r1.images.map(l => l.url).sort(),
+    r2.images.map(l => l.url).sort(),
+  );
+  t.deepEqual(
+    r1.rest.map(l => l.url).sort(),
+    r2.rest.map(l => l.url).sort(),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// D chain 在空文件上的健壮性
+// ---------------------------------------------------------------------------
+
+test('D chain on file with no links returns empty array', async (t) => {
+  const links = await h('empty.md').gather().detectExternalRefs();
+  t.deepEqual(links, []);
 });
