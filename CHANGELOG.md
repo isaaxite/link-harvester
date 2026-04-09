@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.0](https://github.com/isaaxite/link-harvester/compare/v1.0.1...v2.0.0) (2026-04-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* del and alter a lot
+
+### Features
+
+* call detectExternalRefs in advance ([b39d63c](https://github.com/isaaxite/link-harvester/commit/b39d63c5add0a1e86a8a6e523a84102a5ce99fdd))
+
+
+### Code Refactoring
+
+* del and alter a lot ([b4db1de](https://github.com/isaaxite/link-harvester/commit/b4db1de55ba3590d6077fb461579440ab256b99e))
+
 ## [1.0.1](https://github.com/isaaxite/link-harvester/compare/v1.0.0...v1.0.1) (2026-04-06)
 
 
