@@ -4,6 +4,11 @@ import { FilterPredicate, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDe
 import { isOpFilterDescriptor } from "./types/assert";
 import { sep } from "node:path";
 
+/**
+ * Checks if a URL points to a resource file based on its file extension
+ * @param url - The URL to check
+ * @returns True if the URL has a resource file extension
+ */
 export function isResourceUrl(url: string) {
   try {
     const cleanPath = url.split('?')[0].split('#')[0];
@@ -14,8 +19,12 @@ export function isResourceUrl(url: string) {
   }
 }
 
-/** Check if a local file is accessible (exists and is readable) */
-export  function isAccessible(path: string) {
+/**
+ * Checks if a local file is accessible (exists and is readable)
+ * @param path - The file path to check
+ * @returns True if the file is accessible
+ */
+export function isAccessible(path: string) {
   try {
     accessSync(path, constants.R_OK);
     return true;
@@ -25,8 +34,8 @@ export  function isAccessible(path: string) {
 };
 
 /**
- * Classify a single URL into one of the LinkTarget categories.
- * @param url The URL to classify.
+ * Classifies a single URL into one of the LinkTarget categories.
+ * @param url - The URL to classify.
  * @returns The LinkTarget category for the given URL.
  */
 export function classifyLink(url: string) {
@@ -60,11 +69,20 @@ export function classifyLink(url: string) {
   return LinkTarget.LocalResource;
 }
 
-/** Remove trailing path separators from a file path */
+/**
+ * Removes trailing path separators from a file path
+ * @param pathStr - The path string to clean
+ * @returns The path without trailing separators
+ */
 export function removeTrailSep(pathStr: string) {
   return pathStr.replace(new RegExp(`${sep}+$`), '');
 }
 
+/**
+ * Merges consecutive filter operations into a single filter with combined predicate
+ * @param ops - Array of operation descriptors
+ * @returns Optimized array with merged filters
+ */
 function mergeFilters(ops: OpDescriptor[]) {
   const result: OpDescriptor[] = [];
   let i = 0;
@@ -90,6 +108,11 @@ function mergeFilters(ops: OpDescriptor[]) {
   return result;
 }
 
+/**
+ * Removes duplicate detection operations, keeping only the first occurrence of each type
+ * @param opArr - Array of operation descriptors
+ * @returns Optimized array with deduplicated detection operations
+ */
 function dedupeDetect(opArr: OpDescriptor[]) {
   const dedupe: string[] = [];
   const result: OpDescriptor[] = [];
@@ -118,6 +141,13 @@ function dedupeDetect(opArr: OpDescriptor[]) {
   return result;
 }
 
+/**
+ * Optimizes a list of operation descriptors by:
+ * 1. Deduplicating detection operations
+ * 2. Merging consecutive filter operations
+ * @param ops - Array of operation descriptors to optimize
+ * @returns Optimized array of operation descriptors
+ */
 export function optimizeOps(ops: OpDescriptor[]) {
   let opArr = dedupeDetect([...ops]);
 
