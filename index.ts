@@ -1,8 +1,8 @@
 import { extractLinks } from "./src/extractor";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, LinkHarvesterProps, InvokedChain } from "./src/types";
-import { isOpGatherDescriptor, isLinkTarget, isLinkType, InvokedChainAssert } from "./src/types/assert";
-import { getInvokedChainStr, isAccessible, optimizeOps, removeTrailSep } from "./src/utils";
+import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, LinkHarvesterProps, OpFilterDescriptor } from "./src/types";
+import { isOpGatherDescriptor, isLinkTarget, isLinkType } from "./src/types/assert";
+import { isAccessible, optimizeOps, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
 import { REST_KEY } from "./src/constants";
 
@@ -11,7 +11,7 @@ export { extractLinks } from './src/extractor';
 export { LinkTarget, LinkType, ClassifyType, ExtractedLink, LinkHarvesterProps } from './src/types';
 
 class Pipeline<TState extends State = 'classifyLinks'> {
-  private _cache: any = {};
+  private _resourceRefsCache: Record<string, string[]> = {};
   private dataList: ExtractedLink[] = [];
   private otherFilePaths: string[] | null = null;
   protected base!: string;
@@ -76,344 +76,175 @@ class Pipeline<TState extends State = 'classifyLinks'> {
       const absolute = join(this.base, this.filePath);
       this.dataList = await extractLinks(absolute);
     }
-
-    let ops = this.ops.slice(1);
-
-    if (!ops.length) {
+    if (this.ops.length === 1) {
       return this.dataList;
     }
 
-    ops = optimizeOps([...ops]);
+    const ops = optimizeOps(this.ops.slice(1));
+    const dirPath = dirname(join(this.base, this.filePath));
+    const classifyIdx = ops.findIndex(op => op.type === OpDescriptorType.Classify);
+    const hasExternalRefsDetect = () => ops.find(op => op.type === OpDescriptorType.DetectExternalRefs);
+    let linearOps = ops;
+    let result: ExtractedLink[] | Record<string, ExtractedLink[]> = [];
+    let classifier: ((item: ExtractedLink) => string[]) | null = null;
 
-    const invokedChainStr = getInvokedChainStr(ops);
-    const assert = new InvokedChainAssert(invokedChainStr);
-
-    if (invokedChainStr.includes(InvokedChain.C)) {
-      return await this._exeClassifyLinks({ ops, assert });
+    if (classifyIdx !== -1) {
+      const classify = this._parseClassifyOps(ops.slice(classifyIdx));
+      result = classify.init();
+      classifier = classify.processor;
+      linearOps = ops.slice(0, classifyIdx);
     }
 
-    return await this._execExtractLinks({ ops, assert });
+    const { preFilter, detect, postFilter } = this._parseLinerOps(linearOps);
+
+    if (hasExternalRefsDetect()) {
+      await this._setResourceRefsCache();
+    }
+
+    for (let i = 0; i < this.dataList.length; i++) {
+      const item = { ...this.dataList[i] };
+      if (preFilter && !preFilter(item)) { continue; }
+      if (detect && item.linkTarget === LinkTarget.LocalResource) {
+        const abs = join(dirPath, item.url);
+        item.externalRefs = this._detectExternalRefs(abs) || [];
+      }
+      if (postFilter && !postFilter(item)) { continue; }
+
+      if (classifier) {
+        classifier(item).forEach(key => {
+          (result as Record<string, ExtractedLink[]>)[key].push(item);
+        });
+      } else {
+        (result as ExtractedLink[]).push(item);
+      }
+    }
+
+    return result;
   }
 
-  private async _execExtractLinks({ ops, assert }: {
-    ops: OpDescriptor[];
-    assert: InvokedChainAssert;
-  }) {
-    const result: ExtractedLink[] = [];
-    const dirPath = dirname(join(this.base, this.filePath));
+  private _parseLinerOps(ops: OpDescriptor[]) {
+    const result: {
+      preFilter: FilterPredicate | null;
+      detect: OpDetectExternalRefsDescriptor | null;
+      postFilter: FilterPredicate | null;
+    } = {
+      preFilter: null,
+      detect: null,
+      postFilter: null,
+    };
 
-    if (assert.isFInvokeChain(ops)) {
-      const [filter] = ops;
-      for (const data of this.dataList) {
-        if (!filter.predicate(data)) { continue; }
-        result.push({ ...data });
-      }
+    if (!ops.length) {
       return result;
     }
 
-    if (assert.isDInvokeChain(ops)) {
-      for (const data of this.dataList) {
-        const item = { ...data };
-        if (data.linkTarget === LinkTarget.LocalResource) {
-          const abs = join(dirPath, data.url);
-          item.externalRefs = await this._detectExternalRefs(abs) || [];
-        }
+    const detectIdx = ops.findIndex(op => op.type === OpDescriptorType.DetectExternalRefs);
 
-        result.push(item);
-      }
+    if (detectIdx === -1) {
+      result.preFilter = (ops[0] as OpFilterDescriptor).predicate;
       return result;
     }
 
-    if (assert.isDFInvokeChain(ops)) {
-      const filter = ops[1];
-      for (const data of this.dataList) {
-        const item = { ...data };
-        if (data.linkTarget === LinkTarget.LocalResource) {
-          const abs = join(dirPath, data.url);
-          item.externalRefs = await this._detectExternalRefs(abs) || [];
-        }
+    result.detect = ops[detectIdx] as OpDetectExternalRefsDescriptor;
 
-        if (!filter.predicate(item)) { continue; }
-        result.push(item);
-      }
-
-      return result;
+    if (detectIdx > 0) {
+      result.preFilter = (ops[0] as OpFilterDescriptor).predicate;
     }
 
-    if (assert.isFDInvokeChain(ops)) {
-      const [filter] = ops;
-      for (const data of this.dataList) {
-        if (!filter.predicate(data)) { continue; }
-        if (data.linkTarget === LinkTarget.LocalResource) {
-          const abs = join(dirPath, data.url);
-          data.externalRefs = await this._detectExternalRefs(abs) || [];
-        }
-        result.push({ ...data });
-      }
-
-      return result;
+    if (detectIdx + 1 < ops.length) {
+      result.postFilter = (ops[detectIdx + 1] as OpFilterDescriptor).predicate;
     }
 
-    if (assert.isFDFInvokeChain(ops)) {
-      const filter = ops[0];
-      const subFilter = ops[2];
-      for (const data of this.dataList) {
-        const item = { ...data };
-        if (!filter.predicate(item)) { continue; }
-        if (data.linkTarget === LinkTarget.LocalResource) {
-          const abs = join(dirPath, data.url);
-          item.externalRefs = await this._detectExternalRefs(abs) || [];
-        }
-        if (!subFilter.predicate(item)) { continue; }
-        result.push(item);
-      }
-
-      return result;
-    }
+    return result;
   }
 
-  private async _exeClassifyLinks({ ops, assert }: {
-    ops: OpDescriptor[];
-    assert: InvokedChainAssert;
-  }) {
-    const result: { [key: string]: ExtractedLink[] } = {};
+  private _parseClassifyOps(ops: OpDescriptor[]) {
     const dirPath = dirname(join(this.base, this.filePath));
-    const { buckets } = ops.find(it => it.type === OpDescriptorType.Classify) as OpClassifyDescriptor;
+    const { buckets } = (ops[0] as OpClassifyDescriptor);
     const keys = Object.keys(buckets);
     const restKeyIdx = keys.findIndex(key => buckets[key] === REST_KEY);
     let restKey: string = REST_KEY;
-
-    const attactExternalRefs = async (item: ExtractedLink) => {
-      if (item.linkTarget === LinkTarget.LocalResource) {
-        item.externalRefs = await this._detectExternalRefs(join(dirPath, item.url)) || [];
-      }
-    };
-
-    const detectExternalRefsFactory = (detectExternalRefs: OpDetectExternalRefsDescriptor) => {
-      return detectExternalRefs.keys?.length ? async (...rest: any) => {
-        const [it, key] = rest as [ExtractedLink, string];
-        if (!detectExternalRefs.keys!.includes(key)) { return; }
-        await attactExternalRefs(it);
-      } : async (...rest: any) => {
-        const [it] = rest as [ExtractedLink];
-        await attactExternalRefs(it);
-      };
-    };
-
     if (restKeyIdx !== -1) {
       restKey = keys[restKeyIdx];
       keys.splice(restKeyIdx, 1);
     }
-    result[restKey] = [];
-    keys.reduce((result, key) => {
-      result[key] = [];
-      return result;
-    }, result);
 
-    if (assert.isCInvokeChain(ops)) {
-      for (const data of this.dataList) {
-        let hasRest = true;
-        for (const key of keys) {
-          const classifyFilter = buckets[key] as FilterPredicate;
-          if (!classifyFilter(data)) { continue; }
-
-          hasRest = false;
-          result[key].push(data);
-        }
-        if (hasRest) {
-          result[restKey].push(data);
-        }
+    const attactExternalRefs = (item: ExtractedLink) => {
+      if (item.linkTarget === LinkTarget.LocalResource) {
+        item.externalRefs = this._detectExternalRefs(join(dirPath, item.url)) || [];
       }
-      return result;
+    };
+
+    let detector: ((item: ExtractedLink, key?: string) => void) | null = null;
+
+    if (ops.length > 1) {
+      const detect = ops[1] as OpDetectExternalRefsDescriptor;
+      detector = detect.keys?.length ? (it, key) => {
+        if (!detect.keys!.includes(key!)) { return; }
+        attactExternalRefs(it);
+      } : (it) => attactExternalRefs(it);
     }
 
-    if (assert.isCDInvokeChain(ops)) {
-      const detectExternalRefs = ops[1];
-      const detectExternalRefsAttacher = detectExternalRefsFactory(detectExternalRefs);
+    const init = () => {
+      const result: Record<string, ExtractedLink[]> = {}
+      keys.reduce((result, key) => {
+        result[key] = [];
+        return result;
+      }, result);
 
-      for (const data of this.dataList) {
-        let hasRest = true;
-        const item = { ...data };
-        for (const key of keys) {
-          const classifyFilter = buckets[key] as FilterPredicate;
-          if (!classifyFilter(item)) { continue; }
+      result[restKey] = [];
+      return result;
+    };
 
-          await detectExternalRefsAttacher(item, key);
-          result[key].push(item);
-          hasRest = false;
-        }
-        if (hasRest) {
-          result[restKey].push(data);
-        }
+    const processor = (item: ExtractedLink) => {
+      let hasRest = true;
+      const result: string[] = [];
+      for (const key of keys) {
+        const classifyFilter = buckets[key] as FilterPredicate;
+        if (!classifyFilter(item)) { continue; }
+
+        detector && detector(item, key);
+        result.push(key);
+        hasRest = false;
+      }
+      if (hasRest) {
+        result.push(restKey);
       }
       return result;
-    }
+    };
 
-    if (assert.isFCInvokeChain(ops)) {
-      const filter = ops[0];
-      for (const data of this.dataList) {
-        let hasRest = true;
-        if (!filter.predicate(data)) { continue; }
-        for (const key of keys) {
-          const classifyFilter = buckets[key] as FilterPredicate;
-          if (!classifyFilter(data)) { continue; }
-          hasRest = false;
-          result[key].push(data);
-        }
-        if (hasRest) {
-          result[restKey].push(data);
-        }
-      }
-      return result;
-    }
-
-    if (assert.isDFCInvokeChain(ops)) {
-      const filter = ops[1];
-      for (const data of this.dataList) {
-        let hasRest = true;
-        const item = { ...data };
-
-        await attactExternalRefs(item);
-
-        if (!filter.predicate(item)) { continue; }
-
-        for (const key of keys) {
-          const classifyFilter = buckets[key] as FilterPredicate;
-          if (!classifyFilter(item)) { continue; }
-          hasRest = false;
-          result[key].push(item);
-        }
-        if (hasRest) {
-          result[restKey].push(item);
-        }
-      }
-      return result;
-    }
-
-    if (assert.isFCDInvokeChain(ops)) {
-      const filter = ops[0];
-      const detectExternalRefs = ops[2];
-      const detectExternalRefsAttacher = detectExternalRefsFactory(detectExternalRefs);
-
-      for (const data of this.dataList) {
-        let hasRest = true;
-        const item = { ...data };
-
-        if (!filter.predicate(item)) { continue; }
-
-        for (const key of keys) {
-          const classifyFilter = buckets[key] as FilterPredicate;
-          if (!classifyFilter(item)) { continue; }
-
-          await detectExternalRefsAttacher(item, key);
-          
-          hasRest = false;
-          result[key].push(item);
-        }
-        if (hasRest) {
-          result[restKey].push(item);
-        }
-      }
-      return result;
-    }
-
-    if (assert.isFDCInvokeChain(ops)) {
-      const filter = ops[0];
-
-      for (const data of this.dataList) {
-        let hasRest = true;
-        const item = { ...data };
-
-        if (!filter.predicate(item)) { continue; }
-
-        await attactExternalRefs(item);
-
-        for (const key of keys) {
-          const classifyFilter = buckets[key] as FilterPredicate;
-          if (!classifyFilter(item)) { continue; }
-          
-          hasRest = false;
-          result[key].push(item);
-        }
-        if (hasRest) {
-          result[restKey].push(item);
-        }
-      }
-      return result;
-    }
-
-    if (assert.isFDFCInvokeChain(ops)) {
-      const filter = ops[0];
-      const subFilter = ops[2];
-
-      for (const data of this.dataList) {
-        let hasRest = true;
-        const item = { ...data };
-
-        if (!filter.predicate(item)) { continue; }
-
-        await attactExternalRefs(item);
-
-        if (!subFilter.predicate(item)) { continue; }
-
-        for (const key of keys) {
-          const classifyFilter = buckets[key] as FilterPredicate;
-          if (!classifyFilter(item)) { continue; }
-          
-          hasRest = false;
-          result[key].push(item);
-        }
-        if (hasRest) {
-          result[restKey].push(item);
-        }
-      }
-      return result;
-    }
+    return { init, processor };
   }
 
-  private async _detectExternalRefs(assetAbsPath: string) {
+  private _detectExternalRefs(assetAbsPath: string) {
     const mainMdFilePath = this.filePath;
-    return Promise.allSettled(this._getOtherFilePaths().map(async (curMdFilePath) => {
-      if (mainMdFilePath === curMdFilePath) {
-        return Promise.resolve();
+    const otherFilePaths = this._getOtherFilePaths();
+
+    const refs: string[] = [];
+    for (let i = 0; i < otherFilePaths.length; i++) {
+      const curMdFilePath = otherFilePaths[i];
+      if (mainMdFilePath === curMdFilePath) { continue; }
+
+      if ((this._resourceRefsCache[curMdFilePath] || []).includes(assetAbsPath)) {
+        refs.push(curMdFilePath);
       }
+    }
 
-      const getRef = (linkDataArr: any) => {
-        const ref: string[] = [];
-        linkDataArr.reduce((ref: string[], linkData: any) => {
-          if (linkData.absolute === assetAbsPath) {
-            ref.push(curMdFilePath);
-          }
-          return ref;
-        }, ref);
-        return ref;
-      };
+    return refs;
+  }
 
-      if (this._cache[curMdFilePath]) {
-        return Promise.resolve(getRef(this._cache[curMdFilePath]));
-      }
-
-      const filePath = join(this.base, curMdFilePath);
+  private _setResourceRefsCache() {
+    const filePaths = this._getOtherFilePaths();
+    return Promise.allSettled(filePaths.map(async (relative) => {
+      const filePath = join(this.base, relative);
       const links = await extractLinks(filePath);
-      const linkDataArr = [];
+      const absArr = [];
       for (const item of links) {
         if (item.linkTarget !== LinkTarget.LocalResource) { continue; }
         const absolute = join(dirname(filePath), item.url);
-        linkDataArr.push({ ...item, absolute });
+        absArr.push(absolute);
       }
-      this._cache[curMdFilePath] = linkDataArr;
-      return Promise.resolve(getRef(linkDataArr));
-    })).then((ret) => {
-      const last: string[] = [];
-      for (const item of ret) {
-        if (item.status === 'fulfilled' && item.value?.length) {
-          last.push(...item.value);
-        }
-      }
-      return last;
-    }).catch((err) => {
-      console.error('Error checking references:', err);
-    });
+      this._resourceRefsCache[relative] = absArr;
+    }));
   }
 
   protected then<TResult1 = ThenParam<TState>, TResult2 = never>(

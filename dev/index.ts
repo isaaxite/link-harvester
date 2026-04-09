@@ -64,7 +64,7 @@ async function main() {
     .detectExternalRefs();
 
   // fcd
-  const ret10 = await harvester().gather()
+  const ret9 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .filter((item) => [
       LinkType.MarkdownImage,
@@ -74,7 +74,7 @@ async function main() {
     .detectExternalRefs();
   
   // fcd
-  const ret11 = await harvester().gather()
+  const ret10 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .filter((item) => [
       LinkType.MarkdownImage,
@@ -85,13 +85,13 @@ async function main() {
     .detectExternalRefs();
 
   // fdf
-  const ret12 = await harvester().gather()
+  const ret11 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .detectExternalRefs()
     .filter(it => !it.externalRefs?.length);
 
   // fdc
-  const ret13 = await harvester().gather()
+  const ret12 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .detectExternalRefs()
     .classify({
@@ -99,7 +99,7 @@ async function main() {
     });
 
   // fdfc
-  const ret14 = await harvester().gather()
+  const ret13 = await harvester().gather()
     .filterBy(LinkTarget.LocalResource)
     .detectExternalRefs()
     .filter(it => !it.externalRefs?.length)

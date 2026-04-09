@@ -26,12 +26,6 @@ export interface ExtractedLink {
   externalRefs?: string[];
 }
 
-export type AccessibleLinkData = ExtractedLink & { absolute: string };
-
-export type AccessibleLinkDataWithRef = AccessibleLinkData & { externalRefs: string[] };
-
-export type CategorizedLinkedData = ExtractedLink & { linkTarget: LinkTarget };
-
 export enum ClassifyType {
   IfAccessable = 'if_accessable',
 }
@@ -63,11 +57,11 @@ export type ThenParam<TState> = TState extends 'extractLinks'
   ? ExtractedLink[]
   : { [key: string]: ExtractedLink[] };
 
-export type RestKey<T> = {
+type RestKey<T> = {
   [K in keyof T]: T[K] extends typeof REST_KEY ? K : never;
 }[keyof T];
 
-export type NonRestKeys<T> = {
+type NonRestKeys<T> = {
   [K in keyof T]: T[K] extends typeof REST_KEY ? never : K;
 }[keyof T];
 
@@ -96,20 +90,3 @@ export interface LinkHarvesterProps {
   base: string;
   filePath: string;
 }
-
-export enum InvokedChain {
-  C     = 'c',
-  D     = 'd',
-  F     = 'f',
-  CD    = 'cd',
-  DF    = 'df',
-  FC    = 'fc',
-  FD    = 'fd',
-  DFC   = 'dfc',
-  FCD   = 'fcd',
-  FDF   = 'fdf',
-  FDC   = 'fdc',
-  FDFC  = 'fdfc',
-}
-
-export type FInvokeChain = [OpFilterDescriptor];

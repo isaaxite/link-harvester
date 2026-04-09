@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { RESOURCE_EXTENSIONS } from "./constants";
-import { FilterPredicate, InvokedChain, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDescriptor } from "./types";
+import { FilterPredicate, LinkTarget, OpDescriptor, OpDescriptorType, OpFilterDescriptor } from "./types";
 import { isOpFilterDescriptor } from "./types/assert";
 import { sep } from "node:path";
 
@@ -115,13 +115,4 @@ export function optimizeOps(ops: OpDescriptor[]) {
   opArr = dedupeDetectExternalRefs(opArr);
   
   return opArr;
-}
-
-export function getInvokedChainStr(ops: OpDescriptor[]) {
-  const str: string[] = [];
-  ops.reduce((str, op) => {
-    str.push(op.type[0]);
-    return str;
-  }, str);
-  return str.join('') as InvokedChain;
 }
