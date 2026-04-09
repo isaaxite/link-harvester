@@ -8,7 +8,7 @@ import { REST_KEY } from "./src/constants";
 
 export { REST_KEY } from "./src/constants";
 export { extractLinks } from './src/extractor';
-export { LinkTarget, LinkType, ExtractedLink, LinkHarvesterProps, ExtractedHtmlLink, MarkdownImageLink, MarkdownLink } from './src/types';
+export { LinkTarget, LinkType, DetectType, ExtractedLink, LinkHarvesterProps, ExtractedHtmlLink, MarkdownImageLink, MarkdownLink } from './src/types';
 
 class Pipeline<TState extends State = 'classifyLinks'> {
   private _resourceRefsCache: Record<string, string[]> = {};
