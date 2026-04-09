@@ -43,13 +43,18 @@
 
 ## Features
 
-- Extracts all four link types: Markdown links, Markdown images, HTML `<a>` tags, HTML `<img>` tags
+- Extracts Markdown links, Markdown images, HTML `<a>` anchors, and HTML `<img>` tags
 - Classifies each link's target: external page, external resource, local resource, in-page anchor, or other
-- Fluent chainable pipeline: `gather → filter / filterBy → classify / classifyBy → detectExternalRefs`
-- Cross-file reference detection — find which other Markdown files reference the same local asset
-- Filter and classify operations are merged into a single iteration — no intermediate arrays
-- ESM + CJS dual output, full TypeScript type declarations
-- Node.js ≥ 18
+- Fluent pipeline API: `gather → filter / detect → classify`
+- Built-in `detect(Accessible)` — checks whether local files actually exist on disk
+- Built-in `detect(ExternalRefs)` — finds other Markdown files in the same base directory that reference the same local asset
+- Automatic pipeline optimisation: duplicate `detect` ops are deduplicated; consecutive `filter` ops are merged
+
+---
+
+## Requirements
+
+- Node.js ≥ 18.0.0
 
 ---
 
@@ -64,87 +69,57 @@ npm install link-harvester
 ## Quick Start
 
 ```js
-import { LinkHarvester, LinkType, LinkTarget } from 'link-harvester';
+import { LinkHarvester, LinkType, LinkTarget, DetectType, REST_KEY } from 'link-harvester';
+import { resolve } from 'node:path';
 
 const harvester = new LinkHarvester({
-  base: '/absolute/path/to/project',
-  filePath: 'docs/guide.md',        // relative to base, or absolute
+  base: resolve('./docs'),   // absolute path to the root directory
+  filePath: 'guide/intro.md' // relative (or absolute) path to the target file
 });
 
-// Gather all links
+// Gather all links from the file
 const links = await harvester.gather();
-
-// Filter to local resources only
-const localLinks = await harvester.gather().filterBy(LinkTarget.LocalResource);
-
-// Classify into images vs everything else
-const { images, rest } = await harvester.gather().classify({
-  images: (l) => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
-  rest: 'rest',
-});
-
-// Find which other markdown files reference the same local assets
-const result = await harvester
-  .gather()
-  .filterBy(LinkTarget.LocalResource)
-  .classify({ docs: (l) => l.url.endsWith('.md'), rest: 'rest' })
-  .on('docs')
-  .detectExternalRefs();
-
-for (const item of result.docs) {
-  console.log(item.url, '← referenced by:', item.externalRefs);
-}
+console.log(links);
 ```
-
-### CommonJS
- 
-```js
-const { LinkHarvester, LinkType, LinkTarget } = require('link-harvester');
- 
-const harvester = new LinkHarvester({
-  base: '/absolute/path/to/project',
-  filePath: 'docs/guide.md',
-});
- 
-const links = await harvester.gather();
-```
-
-All APIs documented below are available in both ESM and CommonJS.
 
 ---
 
 ## API
 
-### `new LinkHarvester(props)`
+### `new LinkHarvester({ base, filePath })`
 
-Creates a new harvester instance.
+Creates a harvester instance for a single Markdown file.
 
-| Param | Type | Description |
+| Option | Type | Description |
 |---|---|---|
-| `props.base` | `string` | **Absolute** path to the project root directory |
-| `props.filePath` | `string` | Path to the target Markdown file — relative to `base`, or absolute (must be inside `base`) |
+| `base` | `string` | **Absolute** path to the root directory. Used to resolve relative file paths and to scope cross-reference scanning. |
+| `filePath` | `string` | Path to the target Markdown file. May be relative to `base` or absolute (must be inside `base`). |
 
-Throws `Error` if `base` is not an absolute path, does not exist, or `filePath` cannot be resolved within `base`.
+Throws `Error` when:
+- `base` is not a string, not an absolute path, or does not exist
+- `filePath` is not a string, does not exist, or is outside `base`
 
 ---
 
 ### `.gather()` → `LinkDataPipeline`
 
-Reads the target file and extracts all links. Must be the first call in every pipeline chain. Schedules execution asynchronously — the result is resolved when the returned pipeline is awaited.
+Reads and parses the target file. Must be the first call in every pipeline chain. Returns a `LinkDataPipeline` for further operations.
 
 ```js
 const links = await harvester.gather();
-// links: ExtractedLink[]
+// → ExtractedLink[]
 ```
 
 ---
 
 ### `.filter(predicate)` → `LinkDataPipeline`
 
-Keeps only links for which `predicate(link)` returns `true`. Multiple `.filter()` calls are merged into a single AND pass.
+Keeps only links for which `predicate(link)` returns `true`. Multiple `.filter()` calls are merged into a single AND check.
 
 ```js
-const links = await harvester.gather().filter((l) => l.line > 10);
+const links = await harvester
+  .gather()
+  .filter(l => l.linkTarget === LinkTarget.LocalResource);
 ```
 
 Throws `TypeError` if `predicate` is not a function.
@@ -153,136 +128,208 @@ Throws `TypeError` if `predicate` is not a function.
 
 ### `.filterBy(type)` → `LinkDataPipeline`
 
-Shorthand filter by a `LinkType` or `LinkTarget` enum value.
+Shorthand for filtering by a `LinkType` or `LinkTarget` enum value.
 
 ```js
-import { LinkType, LinkTarget } from 'link-harvester';
-
+// By link type
 await harvester.gather().filterBy(LinkType.MarkdownImage);
+
+// By link target
 await harvester.gather().filterBy(LinkTarget.ExternalPage);
 ```
 
-Throws `TypeError` if `type` is not a valid `LinkType` or `LinkTarget`.
-
-**`LinkType` values**
-
-| Value | Description |
-|---|---|
-| `LinkType.MarkdownLink` | `[text](url)` |
-| `LinkType.MarkdownImage` | `![alt](url)` |
-| `LinkType.HtmlImage` | `<img src="…">` |
-| `LinkType.HtmlAnchor` | `<a href="…">` |
-
-**`LinkTarget` values**
-
-| Value | Description |
-|---|---|
-| `LinkTarget.ExternalPage` | `https://…` URL without a known resource extension |
-| `LinkTarget.ExternalResource` | `https://…` URL with a resource extension (`.png`, `.pdf`, …) |
-| `LinkTarget.LocalResource` | Relative or root-relative path without a scheme |
-| `LinkTarget.InPageAnchor` | Starts with `#` |
-| `LinkTarget.Other` | `mailto:`, `ftp:`, empty URL, etc. |
+Throws `TypeError` for any unrecognised value.
 
 ---
 
-### `.classify(buckets)` → `ClassificationPipeline`
+### `.detect(detectType)` → `LinkDataPipeline`
 
-Splits links into named buckets. Each key maps to a predicate function, or the special string `'rest'` which marks that key as the catch-all bucket for unmatched items. If no key is marked `'rest'`, unmatched items are collected under the default key `'rest'`.
+Runs a detection pass that enriches each `ExtractedLink` with additional fields. Only affects `LocalResource` links.
 
-The rest key name is fully customisable — any key whose value is `'rest'` becomes the catch-all, regardless of its name:
+| `detectType` | Effect |
+|---|---|
+| `DetectType.Accessible` | Sets `link.accessible: boolean` — `true` if the file exists and is readable. |
+| `DetectType.ExternalRefs` | Sets `link.externalRefs: string[]` — relative paths of other `.md`/`.markdown` files in `base` that reference the same local asset. |
 
 ```js
-// Default rest key name
-const { images, links, rest } = await harvester.gather().classify({
-  images: (l) => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
-  links:  (l) => l.type === LinkType.MarkdownLink  || l.type === LinkType.HtmlAnchor,
-  rest: 'rest',
-});
+import { DetectType } from 'link-harvester';
 
-// Custom rest key name
-const { accessible, invalid } = await harvester.gather().classify({
-  accessible: (l) => l.linkTarget === LinkTarget.LocalResource,
-  invalid: 'rest',   // unmatched items go here under the key "invalid"
-});
+// Check file accessibility
+const links = await harvester
+  .gather()
+  .detect(DetectType.Accessible);
+
+// Find cross-file references
+const links = await harvester
+  .gather()
+  .detect(DetectType.ExternalRefs);
 ```
 
-**Validation** — throws `TypeError` if:
+Throws `TypeError` for an unrecognised `detectType`.
 
+---
+
+### `.classify(buckets)` → `ThenPipeline`
+
+Partitions links into named buckets. Returns a `ThenPipeline` (thenable, no further chaining).
+
+Each value in `buckets` must be either:
+- a predicate function `(link: ExtractedLink) => boolean`, or
+- the `REST_KEY` constant (`"rest"`) — collects every link not matched by any named bucket.
+
+At most one bucket may use `REST_KEY`.
+
+```js
+import { REST_KEY } from 'link-harvester';
+
+const result = await harvester
+  .gather()
+  .classify({
+    images: l => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
+    pages:  l => l.linkTarget === LinkTarget.ExternalPage,
+    rest:   REST_KEY,
+  });
+
+console.log(result.images); // ExtractedLink[]
+console.log(result.pages);  // ExtractedLink[]
+console.log(result.rest);   // ExtractedLink[]  (everything else)
+```
+
+Throws `TypeError` when:
 - `buckets` is not a plain object
 - `buckets` is empty
-- More than one value is the string `'rest'`
-- Any value is neither a function nor `'rest'`
+- more than one bucket uses `REST_KEY`
+- any bucket value is neither a function nor `REST_KEY`
 
 ---
 
-### `.classifyBy(ClassifyType.IfAccessable)` → `ClassificationPipeline`
+## Pipeline Composition
 
-Built-in classification that checks whether each local-resource link points to a file that actually exists and is readable on disk.
+Operations can be freely composed before `.classify()` terminates the chain.
 
-```js
-import { ClassifyType } from 'link-harvester';
-
-const { accessible, invalid } = await harvester
-  .gather()
-  .classifyBy(ClassifyType.IfAccessable);
+```
+gather()
+  → .filter()       zero or more, merged into a single AND predicate
+  → .detect()       zero or more, deduplicated automatically
+  → .filterBy()     shorthand for .filter() by type or target
+  → .classify()     optional terminal — switches result to Record<string, ExtractedLink[]>
 ```
 
-Result buckets: `accessible` (readable local files) and `invalid` (missing files plus all non-local links).
+### Examples
 
----
-
-### `.on(key).detectExternalRefs()` → `ThenPipeline`
-
-After `.classify()`, call `.on(bucketKey)` to select a bucket, then `.detectExternalRefs()` to scan all other Markdown files under `base` and attach an `externalRefs: string[]` field to each item — listing every other file that references the same local asset.
+**Filter then classify**
 
 ```js
 const result = await harvester
   .gather()
-  .classify({ assets: (l) => l.linkTarget === LinkTarget.LocalResource, rest: 'rest' })
-  .on('assets')
-  .detectExternalRefs();
+  .filter(l => l.type === LinkType.MarkdownImage || l.type === LinkType.MarkdownLink)
+  .classify({
+    images: l => l.type === LinkType.MarkdownImage,
+    rest: REST_KEY,
+  });
+```
 
-for (const item of result.assets) {
-  console.log(item.url, 'also referenced in:', item.externalRefs);
-}
+**Detect accessibility then filter broken links**
+
+```js
+const broken = await harvester
+  .gather()
+  .detect(DetectType.Accessible)
+  .filter(l => l.linkTarget === LinkTarget.LocalResource && l.accessible === false);
+```
+
+**Find shared assets referenced by other files**
+
+```js
+const shared = await harvester
+  .gather()
+  .filter(l => l.linkTarget === LinkTarget.LocalResource)
+  .detect(DetectType.ExternalRefs)
+  .filter(l => l.externalRefs.length > 0);
+```
+
+**Full pipeline: filter → detect → classify**
+
+```js
+const result = await harvester
+  .gather()
+  .filter(l => l.linkTarget === LinkTarget.LocalResource)
+  .detect(DetectType.ExternalRefs)
+  .classify({
+    shared:  l => l.externalRefs.length > 0,
+    private: REST_KEY,
+  });
 ```
 
 ---
 
-### `.detectExternalRefs()` (on `ClassificationPipeline`) → `ThenPipeline`
+## Data Types
 
-Same as above but scans all buckets. The `externalRefs` computation runs for every matched item across all buckets; results are not attached to `data.externalRefs` in this form — use `.on(key).detectExternalRefs()` when you need the refs attached.
+### `ExtractedLink`
+
+All extracted links share these fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `LinkType` | Syntax type of the link |
+| `linkTarget` | `LinkTarget` | Classified target of the URL |
+| `url` | `string` | The raw URL string |
+| `syntax` | `string` | The full matched syntax fragment |
+| `line` | `number` | 1-based line number in the source file |
+| `accessible` | `boolean \| undefined` | Set by `detect(Accessible)` on `LocalResource` links |
+| `externalRefs` | `string[] \| undefined` | Set by `detect(ExternalRefs)` on `LocalResource` links |
+
+Markdown-specific subtypes add:
+
+| Subtype | Extra field | Description |
+|---|---|---|
+| `MarkdownLink` | `text: string` | Link display text |
+| `MarkdownImageLink` | `alt: string` | Image alt text |
 
 ---
 
-### `extractLinks(filePath)` → `Promise<ExtractedLink[]>`
+### `LinkType`
 
-Low-level function, also exported directly. Parses a single Markdown file and returns all extracted links without any pipeline.
+| Value | Syntax |
+|---|---|
+| `LinkType.MarkdownLink` | `[text](url)` |
+| `LinkType.MarkdownImage` | `![alt](url)` |
+| `LinkType.HtmlImage` | `<img src="url">` |
+| `LinkType.HtmlAnchor` | `<a href="url">` |
+
+---
+
+### `LinkTarget`
+
+| Value | Condition |
+|---|---|
+| `LinkTarget.ExternalPage` | `http(s)://` URL without a resource file extension |
+| `LinkTarget.ExternalResource` | `http(s)://` URL with a resource file extension (image, pdf, zip, …) |
+| `LinkTarget.LocalResource` | Relative path with no scheme |
+| `LinkTarget.InPageAnchor` | Starts with `#` |
+| `LinkTarget.Other` | `mailto:`, `ftp:`, empty, or other schemes |
+
+---
+
+### `DetectType`
+
+| Value | Description |
+|---|---|
+| `DetectType.Accessible` | Check if the local file is readable |
+| `DetectType.ExternalRefs` | Find other Markdown files that reference the same local asset |
+
+---
+
+## Low-level API: `extractLinks`
+
+The underlying parser is also exported for direct use:
 
 ```js
 import { extractLinks } from 'link-harvester';
 
 const links = await extractLinks('/absolute/path/to/file.md');
+// → ExtractedLink[]
 ```
-
----
-
-## `ExtractedLink` Shape
-
-```ts
-interface ExtractedLink {
-  type:        LinkType;      // syntax variant
-  linkTarget:  LinkTarget;    // semantic target category
-  syntax:      string;        // full matched text, e.g. "![alt](./img.png)"
-  url:         string;        // extracted URL / path
-  line:        number;        // 1-based line number in the source file
-  alt?:        string;        // present on MarkdownImage
-  text?:       string;        // present on MarkdownLink
-  externalRefs?: string[];    // populated by detectExternalRefs()
-}
-```
-
----
 
 ## License
 

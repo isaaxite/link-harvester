@@ -43,13 +43,18 @@
 
 ## 特性
 
-- 提取全部四种链接类型：Markdown 链接、Markdown 图片、HTML `<a>` 标签、HTML `<img>` 标签
-- 对每条链接的目标进行分类：外部页面、外部资源、本地资源、页内锚点、其他
-- 流畅的链式 Pipeline：`gather → filter / filterBy → classify / classifyBy → detectExternalRefs`
-- 跨文件引用检测——找出哪些其他 Markdown 文件引用了同一个本地资源
-- filter 与 classify 合并为单次循环执行，无中间数组，减少不必要的遍历
-- ESM + CJS 双格式输出，附完整 TypeScript 类型声明
-- 要求 Node.js ≥ 18
+- 提取 Markdown 链接、Markdown 图片、HTML `<a>` 锚点、HTML `<img>` 标签
+- 自动分类链接目标：外部页面、外部资源、本地资源、页内锚点、其他
+- 流式管道 API：`gather → filter / detect → classify`
+- 内置 `detect(Accessible)` — 检测本地文件是否真实存在且可读
+- 内置 `detect(ExternalRefs)` — 扫描同一 `base` 目录下其他 Markdown 文件，找出引用了相同本地资源的文件列表
+- 自动管道优化：重复的 `detect` 操作会被去重，连续的 `filter` 操作会被合并为单次 AND 检查
+
+---
+
+## 运行环境
+
+- Node.js ≥ 18.0.0
 
 ---
 
@@ -61,225 +66,269 @@ npm install link-harvester
 
 ---
 
-## 快速开始
+## 快速上手
 
 ```js
-import { LinkHarvester, LinkType, LinkTarget } from 'link-harvester';
+import { LinkHarvester, LinkType, LinkTarget, DetectType, REST_KEY } from 'link-harvester';
+import { resolve } from 'node:path';
 
 const harvester = new LinkHarvester({
-  base: '/absolute/path/to/project',
-  filePath: 'docs/guide.md',   // 相对于 base 的路径，或绝对路径
+  base: resolve('./docs'),   // 根目录的绝对路径
+  filePath: 'guide/intro.md' // 目标文件的相对路径（或绝对路径）
 });
 
-// 获取全部链接
+// 提取文件中的所有链接
 const links = await harvester.gather();
-
-// 只保留本地资源链接
-const localLinks = await harvester.gather().filterBy(LinkTarget.LocalResource);
-
-// 按图片 / 其他分类
-const { images, rest } = await harvester.gather().classify({
-  images: (l) => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
-  rest: 'rest',
-});
-
-// 检测哪些其他文件也引用了相同的本地资源
-const result = await harvester
-  .gather()
-  .filterBy(LinkTarget.LocalResource)
-  .classify({ docs: (l) => l.url.endsWith('.md'), rest: 'rest' })
-  .on('docs')
-  .detectExternalRefs();
-
-for (const item of result.docs) {
-  console.log(item.url, '← 被以下文件引用：', item.externalRefs);
-}
+console.log(links);
 ```
-
-### CommonJS
-
-```js
-const { LinkHarvester, LinkType, LinkTarget } = require('link-harvester');
- 
-const harvester = new LinkHarvester({
-  base: '/absolute/path/to/project',
-  filePath: 'docs/guide.md',
-});
- 
-const links = await harvester.gather();
-```
-
-以下所有 API 均支持 ESM 与 CommonJS 两种方式使用。
 
 ---
 
 ## API
 
-### `new LinkHarvester(props)`
+### `new LinkHarvester({ base, filePath })`
 
-创建一个新的 Harvester 实例。
+创建一个针对单个 Markdown 文件的 harvester 实例。
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
-| `props.base` | `string` | 项目根目录的**绝对**路径 |
-| `props.filePath` | `string` | 目标 Markdown 文件路径——相对于 `base` 的相对路径，或绝对路径（必须位于 `base` 内部） |
+| `base` | `string` | 根目录的**绝对路径**。用于解析相对文件路径，以及限定跨引用扫描的范围。 |
+| `filePath` | `string` | 目标 Markdown 文件的路径，可以是相对于 `base` 的相对路径，也可以是绝对路径（必须位于 `base` 内部）。 |
 
-以下情况会抛出 `Error`：`base` 不是绝对路径、目录不存在、`filePath` 无法在 `base` 下解析。
+以下情况会抛出 `Error`：
+- `base` 不是字符串、不是绝对路径或目录不存在
+- `filePath` 不是字符串、文件不存在或位于 `base` 之外
 
 ---
 
 ### `.gather()` → `LinkDataPipeline`
 
-读取目标文件并提取所有链接。每条 Pipeline 链的第一个调用必须是 `gather()`。执行被异步调度——对返回的 Pipeline 进行 `await` 时结果才会被 resolve。
+读取并解析目标文件，必须是管道链的第一个调用。返回 `LinkDataPipeline` 供后续操作使用。
 
 ```js
 const links = await harvester.gather();
-// links: ExtractedLink[]
+// → ExtractedLink[]
 ```
 
 ---
 
 ### `.filter(predicate)` → `LinkDataPipeline`
 
-保留使 `predicate(link)` 返回 `true` 的链接。多个 `.filter()` 调用会被合并为一次 AND 过滤。
+只保留 `predicate(link)` 返回 `true` 的链接。多次调用 `.filter()` 会被合并为单次 AND 检查。
 
 ```js
-const links = await harvester.gather().filter((l) => l.line > 10);
+const links = await harvester
+  .gather()
+  .filter(l => l.linkTarget === LinkTarget.LocalResource);
 ```
 
-若 `predicate` 不是函数，抛出 `TypeError`。
+`predicate` 不是函数时抛出 `TypeError`。
 
 ---
 
 ### `.filterBy(type)` → `LinkDataPipeline`
 
-按 `LinkType` 或 `LinkTarget` 枚举值进行快捷过滤。
+按 `LinkType` 或 `LinkTarget` 枚举值过滤的快捷方式。
 
 ```js
-import { LinkType, LinkTarget } from 'link-harvester';
-
+// 按链接类型
 await harvester.gather().filterBy(LinkType.MarkdownImage);
+
+// 按链接目标
 await harvester.gather().filterBy(LinkTarget.ExternalPage);
 ```
 
-若 `type` 不是合法的 `LinkType` 或 `LinkTarget`，抛出 `TypeError`。
-
-**`LinkType` 取值**
-
-| 值 | 说明 |
-|---|---|
-| `LinkType.MarkdownLink` | `[文字](url)` |
-| `LinkType.MarkdownImage` | `![alt](url)` |
-| `LinkType.HtmlImage` | `<img src="…">` |
-| `LinkType.HtmlAnchor` | `<a href="…">` |
-
-**`LinkTarget` 取值**
-
-| 值 | 说明 |
-|---|---|
-| `LinkTarget.ExternalPage` | `https://…` 且不带已知资源后缀 |
-| `LinkTarget.ExternalResource` | `https://…` 且带资源后缀（`.png`、`.pdf` 等） |
-| `LinkTarget.LocalResource` | 无 scheme 的相对路径或根相对路径 |
-| `LinkTarget.InPageAnchor` | 以 `#` 开头 |
-| `LinkTarget.Other` | `mailto:`、`ftp:`、空 URL 等 |
+传入未知值时抛出 `TypeError`。
 
 ---
 
-### `.classify(buckets)` → `ClassificationPipeline`
+### `.detect(detectType)` → `LinkDataPipeline`
 
-将链接分组到命名桶中。每个 key 对应一个断言函数，或特殊字符串 `'rest'`——值为 `'rest'` 的 key 会成为兜底桶，收集所有不匹配任何断言的链接。若没有任何 key 的值为 `'rest'`，不匹配的链接默认收集到名为 `'rest'` 的桶中。
+对每条 `ExtractedLink` 运行检测，写入额外字段。仅对 `LocalResource` 类型的链接生效。
 
-兜底桶的键名可以自定义——只要某个 key 的值是 `'rest'`，它就成为兜底桶，键名本身不受限制：
+| `detectType` | 效果 |
+|---|---|
+| `DetectType.Accessible` | 设置 `link.accessible: boolean`，`true` 表示文件存在且可读。 |
+| `DetectType.ExternalRefs` | 设置 `link.externalRefs: string[]`，内容为 `base` 目录下引用了同一本地资源的其他 `.md`/`.markdown` 文件的相对路径列表。 |
 
 ```js
-// 使用默认键名 rest
-const { images, links, rest } = await harvester.gather().classify({
-  images: (l) => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
-  links:  (l) => l.type === LinkType.MarkdownLink  || l.type === LinkType.HtmlAnchor,
-  rest: 'rest',
-});
- 
-// 自定义兜底桶键名
-const { accessible, invalid } = await harvester.gather().classify({
-  accessible: (l) => l.linkTarget === LinkTarget.LocalResource,
-  invalid: 'rest',   // 不匹配的链接落入 "invalid" 桶
-});
+import { DetectType } from 'link-harvester';
+
+// 检测文件是否可访问
+const links = await harvester
+  .gather()
+  .detect(DetectType.Accessible);
+
+// 查找跨文件引用
+const links = await harvester
+  .gather()
+  .detect(DetectType.ExternalRefs);
 ```
 
-**入参校验**——以下情况抛出 `TypeError`：
+传入未知 `detectType` 时抛出 `TypeError`。
 
+---
+
+### `.classify(buckets)` → `ThenPipeline`
+
+将链接按规则分配到具名桶中。返回 `ThenPipeline`（可 `await`，不可继续链式调用）。
+
+`buckets` 中每个值必须是：
+- 谓词函数 `(link: ExtractedLink) => boolean`，或
+- `REST_KEY` 常量（值为字符串 `"rest"`）——收集所有未被其他桶匹配的链接。
+
+最多只能有一个桶使用 `REST_KEY`。
+
+```js
+import { REST_KEY } from 'link-harvester';
+
+const result = await harvester
+  .gather()
+  .classify({
+    images: l => l.type === LinkType.MarkdownImage || l.type === LinkType.HtmlImage,
+    pages:  l => l.linkTarget === LinkTarget.ExternalPage,
+    rest:   REST_KEY,
+  });
+
+console.log(result.images); // ExtractedLink[]
+console.log(result.pages);  // ExtractedLink[]
+console.log(result.rest);   // ExtractedLink[]（其余所有链接）
+```
+
+以下情况抛出 `TypeError`：
 - `buckets` 不是普通对象
 - `buckets` 为空对象
-- 超过一个值为字符串 `'rest'`
-- 某个值既不是函数也不是 `'rest'`
+- 超过一个桶使用了 `REST_KEY`
+- 某个桶的值既不是函数也不是 `REST_KEY`
 
 ---
 
-### `.classifyBy(ClassifyType.IfAccessable)` → `ClassificationPipeline`
+## 管道组合
 
-内置分类：检测每条本地资源链接所指向的文件是否在磁盘上实际存在且可读。
+操作可以在 `.classify()` 终结链之前自由组合。
 
-```js
-import { ClassifyType } from 'link-harvester';
-
-const { accessible, invalid } = await harvester
-  .gather()
-  .classifyBy(ClassifyType.IfAccessable);
+```
+gather()
+  → .filter()       任意次，自动合并为单次 AND 谓词
+  → .detect()       任意次，重复调用自动去重
+  → .filterBy()     .filter() 的枚举值快捷方式
+  → .classify()     可选终结操作，结果切换为 Record<string, ExtractedLink[]>
 ```
 
-结果桶：`accessible`（磁盘上可读的本地文件）和 `invalid`（文件不存在，以及所有非本地链接）。
+### 示例
 
----
-
-### `.on(key).detectExternalRefs()` → `ThenPipeline`
-
-在 `.classify()` 之后，先调用 `.on(bucketKey)` 选择一个桶，再调用 `.detectExternalRefs()`——它会扫描 `base` 下所有其他 Markdown 文件，并为每条匹配项附上 `externalRefs: string[]` 字段，列出引用了同一本地资源的所有其他文件路径。
+**先过滤再分类**
 
 ```js
 const result = await harvester
   .gather()
-  .classify({ assets: (l) => l.linkTarget === LinkTarget.LocalResource, rest: 'rest' })
-  .on('assets')
-  .detectExternalRefs();
+  .filter(l => l.type === LinkType.MarkdownImage || l.type === LinkType.MarkdownLink)
+  .classify({
+    images: l => l.type === LinkType.MarkdownImage,
+    rest: REST_KEY,
+  });
+```
 
-for (const item of result.assets) {
-  console.log(item.url, '同样被以下文件引用：', item.externalRefs);
-}
+**检测可访问性，再过滤出失效链接**
+
+```js
+const broken = await harvester
+  .gather()
+  .detect(DetectType.Accessible)
+  .filter(l => l.linkTarget === LinkTarget.LocalResource && l.accessible === false);
+```
+
+**找出被其他文件引用的共享资源**
+
+```js
+const shared = await harvester
+  .gather()
+  .filter(l => l.linkTarget === LinkTarget.LocalResource)
+  .detect(DetectType.ExternalRefs)
+  .filter(l => l.externalRefs.length > 0);
+```
+
+**完整管道：过滤 → 检测 → 分类**
+
+```js
+const result = await harvester
+  .gather()
+  .filter(l => l.linkTarget === LinkTarget.LocalResource)
+  .detect(DetectType.ExternalRefs)
+  .classify({
+    shared:  l => l.externalRefs.length > 0,
+    private: REST_KEY,
+  });
 ```
 
 ---
 
-### `.detectExternalRefs()`（在 `ClassificationPipeline` 上）→ `ThenPipeline`
+## 数据类型
 
-与上方相同，但会对所有桶进行扫描。此形式下跨文件引用计算照常运行，但结果不会附加到 `data.externalRefs`——如需将引用结果附加到数据，请使用 `.on(key).detectExternalRefs()`。
+### `ExtractedLink`
+
+所有提取到的链接均包含以下字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `type` | `LinkType` | 链接的语法类型 |
+| `linkTarget` | `LinkTarget` | URL 目标分类 |
+| `url` | `string` | 原始 URL 字符串 |
+| `syntax` | `string` | 完整的匹配语法片段 |
+| `line` | `number` | 在源文件中的行号（从 1 开始） |
+| `accessible` | `boolean \| undefined` | 由 `detect(Accessible)` 设置，仅限 `LocalResource` 链接 |
+| `externalRefs` | `string[] \| undefined` | 由 `detect(ExternalRefs)` 设置，仅限 `LocalResource` 链接 |
+
+Markdown 专属子类型额外包含：
+
+| 子类型 | 额外字段 | 说明 |
+|---|---|---|
+| `MarkdownLink` | `text: string` | 链接显示文本 |
+| `MarkdownImageLink` | `alt: string` | 图片 alt 文本 |
 
 ---
 
-### `extractLinks(filePath)` → `Promise<ExtractedLink[]>`
+### `LinkType`
 
-底层函数，同样直接导出。解析单个 Markdown 文件并返回全部提取到的链接，不经过任何 Pipeline。
+| 值 | 对应语法 |
+|---|---|
+| `LinkType.MarkdownLink` | `[text](url)` |
+| `LinkType.MarkdownImage` | `![alt](url)` |
+| `LinkType.HtmlImage` | `<img src="url">` |
+| `LinkType.HtmlAnchor` | `<a href="url">` |
+
+---
+
+### `LinkTarget`
+
+| 值 | 判断条件 |
+|---|---|
+| `LinkTarget.ExternalPage` | `http(s)://` 开头，且扩展名不属于资源类型 |
+| `LinkTarget.ExternalResource` | `http(s)://` 开头，且扩展名属于资源类型（图片、pdf、zip 等） |
+| `LinkTarget.LocalResource` | 无协议的相对路径 |
+| `LinkTarget.InPageAnchor` | 以 `#` 开头 |
+| `LinkTarget.Other` | `mailto:`、`ftp:`、空字符串或其他协议 |
+
+---
+
+### `DetectType`
+
+| 值 | 说明 |
+|---|---|
+| `DetectType.Accessible` | 检测本地文件是否可读 |
+| `DetectType.ExternalRefs` | 查找引用了同一本地资源的其他 Markdown 文件 |
+
+---
+
+## 底层 API：`extractLinks`
+
+底层解析器也对外导出，可直接使用：
 
 ```js
 import { extractLinks } from 'link-harvester';
 
-const links = await extractLinks('/绝对路径/file.md');
-```
-
----
-
-## `ExtractedLink` 结构
-
-```ts
-interface ExtractedLink {
-  type:        LinkType;      // 链接的语法类型
-  linkTarget:  LinkTarget;    // 链接目标的语义分类
-  syntax:      string;        // 完整匹配文本，如 "![alt](./img.png)"
-  url:         string;        // 提取出的 URL 或路径
-  line:        number;        // 在源文件中的行号（从 1 开始）
-  alt?:        string;        // 仅 MarkdownImage 有此字段
-  text?:       string;        // 仅 MarkdownLink 有此字段
-  externalRefs?: string[];    // 由 detectExternalRefs() 填充
-}
+const links = await extractLinks('/absolute/path/to/file.md');
+// → ExtractedLink[]
 ```
 
 ---
