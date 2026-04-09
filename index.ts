@@ -1,6 +1,6 @@
 import { extractLinks } from "./src/extractor";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import { ClassifyBuckets, ClassifyType, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, OpDetectExternalRefsDescriptor, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, LinkHarvesterProps, OpFilterDescriptor } from "./src/types";
+import { ClassifyBuckets, ExtractedLink, FilterPredicate, LinkTarget, LinkType, OpClassifyDescriptor, OpDescriptor, OpDescriptorType, State, ThenParam, InferClassifyResult, Prettify, PipelineShared, LinkHarvesterProps, DetectType } from "./src/types";
 import { isOpGatherDescriptor, isLinkTarget, isLinkType } from "./src/types/assert";
 import { isAccessible, optimizeOps, removeTrailSep } from "./src/utils";
 import fg from 'fast-glob';
@@ -8,7 +8,7 @@ import { REST_KEY } from "./src/constants";
 
 export { REST_KEY } from "./src/constants";
 export { extractLinks } from './src/extractor';
-export { LinkTarget, LinkType, ClassifyType, ExtractedLink, LinkHarvesterProps } from './src/types';
+export { LinkTarget, LinkType, ExtractedLink, LinkHarvesterProps, ExtractedHtmlLink, MarkdownImageLink, MarkdownLink } from './src/types';
 
 class Pipeline<TState extends State = 'classifyLinks'> {
   private _resourceRefsCache: Record<string, string[]> = {};
@@ -81,7 +81,6 @@ class Pipeline<TState extends State = 'classifyLinks'> {
     }
 
     const ops = optimizeOps(this.ops.slice(1));
-    const dirPath = dirname(join(this.base, this.filePath));
     const classifyIdx = ops.findIndex(op => op.type === OpDescriptorType.Classify);
     const hasExternalRefsDetect = () => ops.find(op => op.type === OpDescriptorType.DetectExternalRefs);
     let linearOps = ops;
@@ -95,7 +94,11 @@ class Pipeline<TState extends State = 'classifyLinks'> {
       linearOps = ops.slice(0, classifyIdx);
     }
 
-    const { preFilter, detect, postFilter } = this._parseLinerOps(linearOps);
+    const {
+      detectAccessible,
+      detectExternalRefs,
+      filter
+    } = this._parseLinerOps(linearOps);
 
     if (hasExternalRefsDetect()) {
       await this._setResourceRefsCache();
@@ -103,12 +106,11 @@ class Pipeline<TState extends State = 'classifyLinks'> {
 
     for (let i = 0; i < this.dataList.length; i++) {
       const item = { ...this.dataList[i] };
-      if (preFilter && !preFilter(item)) { continue; }
-      if (detect && item.linkTarget === LinkTarget.LocalResource) {
-        const abs = join(dirPath, item.url);
-        item.externalRefs = this._detectExternalRefs(abs) || [];
-      }
-      if (postFilter && !postFilter(item)) { continue; }
+
+      detectExternalRefs && detectExternalRefs(item);
+      detectAccessible && detectAccessible(item);
+
+      if (filter && !filter(item)) { continue; }
 
       if (classifier) {
         classifier(item).forEach(key => {
@@ -123,65 +125,57 @@ class Pipeline<TState extends State = 'classifyLinks'> {
   }
 
   private _parseLinerOps(ops: OpDescriptor[]) {
+    const dirPath = dirname(join(this.base, this.filePath));
     const result: {
-      preFilter: FilterPredicate | null;
-      detect: OpDetectExternalRefsDescriptor | null;
-      postFilter: FilterPredicate | null;
+      detectAccessible: ((it: ExtractedLink) => void) | null
+      detectExternalRefs: ((it: ExtractedLink) => void) | null
+      filter: FilterPredicate | null;
     } = {
-      preFilter: null,
-      detect: null,
-      postFilter: null,
+      detectAccessible: null,
+      detectExternalRefs: null,
+      filter: null,
     };
 
-    if (!ops.length) {
-      return result;
-    }
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
 
-    const detectIdx = ops.findIndex(op => op.type === OpDescriptorType.DetectExternalRefs);
+      if (op.type === OpDescriptorType.DetectAccessible) {
+        result.detectAccessible = (it: ExtractedLink) => {
+          if (it.linkTarget !== LinkTarget.LocalResource) {
+            return;
+          }
 
-    if (detectIdx === -1) {
-      result.preFilter = (ops[0] as OpFilterDescriptor).predicate;
-      return result;
-    }
+          const abs = join(dirPath, it.url);
+          it.accessible = isAccessible(abs);
+        };
+      }
 
-    result.detect = ops[detectIdx] as OpDetectExternalRefsDescriptor;
+      if (op.type === OpDescriptorType.DetectExternalRefs) {
+        result.detectExternalRefs = (it: ExtractedLink) => {
+          if (it.linkTarget !== LinkTarget.LocalResource) {
+            return;
+          }
 
-    if (detectIdx > 0) {
-      result.preFilter = (ops[0] as OpFilterDescriptor).predicate;
-    }
+          it.externalRefs = this._detectExternalRefs(join(dirPath, it.url)) || [];
+        }
+      }
 
-    if (detectIdx + 1 < ops.length) {
-      result.postFilter = (ops[detectIdx + 1] as OpFilterDescriptor).predicate;
+      if (op.type === OpDescriptorType.Filter) {
+        result.filter = op.predicate;
+      }
     }
 
     return result;
   }
 
   private _parseClassifyOps(ops: OpDescriptor[]) {
-    const dirPath = dirname(join(this.base, this.filePath));
     const { buckets } = (ops[0] as OpClassifyDescriptor);
     const keys = Object.keys(buckets);
     const restKeyIdx = keys.findIndex(key => buckets[key] === REST_KEY);
-    let restKey: string = REST_KEY;
+    let restKey: string;
     if (restKeyIdx !== -1) {
       restKey = keys[restKeyIdx];
       keys.splice(restKeyIdx, 1);
-    }
-
-    const attactExternalRefs = (item: ExtractedLink) => {
-      if (item.linkTarget === LinkTarget.LocalResource) {
-        item.externalRefs = this._detectExternalRefs(join(dirPath, item.url)) || [];
-      }
-    };
-
-    let detector: ((item: ExtractedLink, key?: string) => void) | null = null;
-
-    if (ops.length > 1) {
-      const detect = ops[1] as OpDetectExternalRefsDescriptor;
-      detector = detect.keys?.length ? (it, key) => {
-        if (!detect.keys!.includes(key!)) { return; }
-        attactExternalRefs(it);
-      } : (it) => attactExternalRefs(it);
     }
 
     const init = () => {
@@ -191,7 +185,9 @@ class Pipeline<TState extends State = 'classifyLinks'> {
         return result;
       }, result);
 
-      result[restKey] = [];
+      if (restKey) {
+        result[restKey] = [];
+      }
       return result;
     };
 
@@ -202,11 +198,10 @@ class Pipeline<TState extends State = 'classifyLinks'> {
         const classifyFilter = buckets[key] as FilterPredicate;
         if (!classifyFilter(item)) { continue; }
 
-        detector && detector(item, key);
         result.push(key);
         hasRest = false;
       }
-      if (hasRest) {
+      if (restKey && hasRest) {
         result.push(restKey);
       }
       return result;
@@ -269,47 +264,6 @@ class ThenPipeline<TConfig extends Record<string, any> = any> extends Pipeline<'
   }
 }
 
-class DetectPipeline<TResultType extends Record<string, ExtractedLink[]> = any> extends Pipeline<'classifyLinks'> {
-  protected keys: string[] = [];
-
-  constructor(props: { key: string; shared: PipelineShared }) {
-    super();
-    this.keys.push(props.key);
-    this._shared = props.shared;
-  }
-
-  detectExternalRefs(): ThenPipeline<TResultType> {
-    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: this.keys });
-    return new ThenPipeline(this._shared);
-  }
-}
-
-class ClassificationPipeline<TConfig extends Record<string, any> = any> extends Pipeline<'classifyLinks'> {
-  constructor(shared: PipelineShared) {
-    super();
-    this._shared = shared;
-  }
-
-  on<K extends keyof InferClassifyResult<TConfig>>(prop: K): DetectPipeline<InferClassifyResult<TConfig>> {
-    return new DetectPipeline<InferClassifyResult<TConfig>>({
-      key: prop as string,
-      shared: this._shared,
-    });
-  }
-
-  detectExternalRefs(): ThenPipeline<InferClassifyResult<TConfig>> {
-    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: null });
-    return new ThenPipeline(this._shared);
-  }
-
-  then<TResult>(
-    onFulfilled?: (value: Prettify<InferClassifyResult<TConfig>>) => TResult | PromiseLike<TResult>,
-    onRejected?: (reason: any) => never
-  ): Promise<TResult> {
-    return this._promise.then(onFulfilled, onRejected);
-  }
-}
-
 class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<TState> {
   constructor(shared: PipelineShared) {
     super();
@@ -320,7 +274,7 @@ class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<T
     if (typeof predicate !== 'function') {
       throw new TypeError('The predicate must be a function.');
     }
-    this._push({ type: OpDescriptorType.Filfer, predicate });
+    this._push({ type: OpDescriptorType.Filter, predicate });
     return new LinkDataPipeline(this._shared);
   }
 
@@ -338,7 +292,7 @@ class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<T
     throw new TypeError('The type is not a LinkType or LinkTarget');
   }
 
-  classify<TConfig extends ClassifyBuckets>(buckets: TConfig): ClassificationPipeline<TConfig> {
+  classify<TConfig extends ClassifyBuckets>(buckets: TConfig): ThenPipeline<TConfig> {
     if (typeof buckets !== 'object' || buckets === null || Array.isArray(buckets)) {
       throw new TypeError('The buckets must be a plain object.');
     }
@@ -355,32 +309,20 @@ class LinkDataPipeline<TState extends State = 'extractLinks'> extends Pipeline<T
       throw new TypeError('Each bucket value must be a predicate function or the string "rest".');
     }
     this._push({ type: OpDescriptorType.Classify, buckets });
-    return new ClassificationPipeline<TConfig>(this._shared);
+    return new ThenPipeline<TConfig>(this._shared);
   }
 
-  classifyBy(type: ClassifyType): ClassificationPipeline<{
-    accessible: FilterPredicate;
-    invalid: typeof REST_KEY;
-  }> {
-    if (type !== ClassifyType.IfAccessable) {
-      throw new TypeError(`The type must be a ${ClassifyType.IfAccessable}.`);
+  detect(detectType: DetectType): LinkDataPipeline<'extractLinks'> {
+    if (detectType === DetectType.ExternalRefs) {
+      this._push({ type: OpDescriptorType.DetectExternalRefs, keys: null });
+      return new LinkDataPipeline(this._shared);
     }
 
-    return this.classify({
-      accessible: (data) => {
-        if (data.linkTarget !== LinkTarget.LocalResource) {
-          return false;
-        }
-        const dirPath = dirname(join(this.base, this.filePath));
-        return isAccessible(join(dirPath, data.url));
-      },
-      invalid: REST_KEY,
-    });
-  }
-
-  detectExternalRefs(): LinkDataPipeline<'extractLinks'> {
-    this._push({ type: OpDescriptorType.DetectExternalRefs, keys: null });
-    return new LinkDataPipeline(this._shared);
+    if (detectType === DetectType.Accessible) {
+      this._push({ type: OpDescriptorType.DetectAccessible });
+      return new LinkDataPipeline(this._shared);
+    }
+    throw new TypeError('The type must be a DetectType.');
   }
 
   then<TResult1 = ThenParam<TState>, TResult2 = never>(

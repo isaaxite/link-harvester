@@ -83,36 +83,45 @@ function mergeFilters(ops: OpDescriptor[]) {
     }
 
     result.push({
-      type: OpDescriptorType.Filfer,
+      type: OpDescriptorType.Filter,
       predicate: x => [...predicates].every(p => p(x)),
     });
   }
   return result;
 }
 
-function dedupeDetectExternalRefs(opArr: OpDescriptor[]) {
+function dedupeDetect(opArr: OpDescriptor[]) {
+  const dedupe: string[] = [];
   const result: OpDescriptor[] = [];
+  const rest = [];
 
-  let isDedupe = false;
   for (const op of opArr) {
-    if (op.type !== OpDescriptorType.DetectExternalRefs) {
+    if ([
+      OpDescriptorType.DetectExternalRefs,
+      OpDescriptorType.DetectAccessible,
+    ].includes(op.type)) {
+
+      if (dedupe.includes(op.type)) {
+        continue;
+      }
+      dedupe.push(op.type);
       result.push(op);
       continue;
     }
 
-    if (!isDedupe) {
-      isDedupe = true;
-      result.push(op);
-    }
+    rest.push(op);
   }
+  dedupe.length = 0;
+
+  result.push(...rest);
 
   return result;
 }
 
 export function optimizeOps(ops: OpDescriptor[]) {
-  let opArr = mergeFilters([...ops]);
+  let opArr = dedupeDetect([...ops]);
 
-  opArr = dedupeDetectExternalRefs(opArr);
+  opArr = mergeFilters(opArr);
   
   return opArr;
 }

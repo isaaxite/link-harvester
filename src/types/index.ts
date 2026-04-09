@@ -15,33 +15,44 @@ export enum LinkTarget {
   Other = 'other',
 }
 
-export interface ExtractedLink {
+export type ExtractedLink = ExtractedHtmlLink | MarkdownImageLink | MarkdownLink;
+
+export interface ExtractedHtmlLink {
   type: LinkType;
   linkTarget: LinkTarget;
   syntax: string;
   url: string;
   line: number;
-  alt?: string; // For markdown images
-  text?: string; // For markdown links
+  accessible?: boolean;
   externalRefs?: string[];
 }
 
-export enum ClassifyType {
-  IfAccessable = 'if_accessable',
+export type MarkdownImageLink = ExtractedHtmlLink & {
+  alt: string; // For markdown images
+}
+
+export type MarkdownLink = ExtractedHtmlLink & {
+  text: string; // For markdown links
+}
+
+export enum DetectType {
+  ExternalRefs = 'external_refs',
+  Accessible = 'accessible',
 }
 
 export enum OpDescriptorType {
   Gather = 'gather',
-  Filfer = 'filter',
+  Filter = 'filter',
   Classify = 'classify',
-  DetectExternalRefs = 'detectExternalRefs',
+  DetectAccessible = 'detect_accessible',
+  DetectExternalRefs = 'detect_external_refs',
 }
 
 export type FilterPredicate = (item: ExtractedLink) => boolean;
 
 export type OpGatherDescriptor = { type: OpDescriptorType.Gather };
 
-export type OpFilterDescriptor = { type: OpDescriptorType.Filfer; predicate: FilterPredicate };
+export type OpFilterDescriptor = { type: OpDescriptorType.Filter; predicate: FilterPredicate };
 
 export type ClassifyBuckets = Record<string, FilterPredicate | typeof REST_KEY>;
 
@@ -49,7 +60,9 @@ export type OpClassifyDescriptor = { type: OpDescriptorType.Classify; buckets: C
 
 export type OpDetectExternalRefsDescriptor = { type: OpDescriptorType.DetectExternalRefs; keys: string[] | null };
 
-export type OpDescriptor = OpGatherDescriptor | OpFilterDescriptor | OpClassifyDescriptor | OpDetectExternalRefsDescriptor;
+export type OpDetectAccessibleDescriptor = { type: OpDescriptorType.DetectAccessible };
+
+export type OpDescriptor = OpGatherDescriptor | OpFilterDescriptor | OpClassifyDescriptor | OpDetectExternalRefsDescriptor | OpDetectAccessibleDescriptor;
 
 export type State = 'extractLinks' | 'classifyLinks';
 
